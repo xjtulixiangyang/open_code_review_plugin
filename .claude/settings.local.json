@@ -9,7 +9,17 @@
       "Bash(git init *)",
       "Bash(git *)",
       "Bash(npm install *)",
-      "Bash(npm test *)"
+      "Bash(npm test *)",
+      "Bash(npm run *)",
+      "Bash(cp /Users/lixiangyang/Desktop/代码/open-code-review/internal/config/allowlist/supported_file_types.json src/core/allowlist/supported_file_types.json)",
+      "Bash(cp /Users/lixiangyang/Desktop/代码/open-code-review/internal/config/allowlist/default_exclude_patterns.json src/core/allowlist/default_exclude_patterns.json)",
+      "Bash(/Users/lixiangyang/.claude/plugins/cache/claude-plugins-official/superpowers/6.0.3/skills/subagent-driven-development/scripts/task-brief docs/superpowers/plans/2026-06-24-opencodereview-plugin.md 6)",
+      "Bash(cp /Users/lixiangyang/Desktop/代码/open-code-review/internal/config/rules/system_rules.json src/core/rules/system_rules.json)",
+      "Bash(cp /Users/lixiangyang/Desktop/代码/open-code-review/internal/config/rules/rule_docs/*.md assets/rule_docs/)",
+      "Bash(/Users/lixiangyang/.claude/plugins/cache/claude-plugins-official/superpowers/6.0.3/skills/subagent-driven-development/scripts/task-brief docs/superpowers/plans/2026-06-24-opencodereview-plugin.md 8)",
+      "Bash(node --import tsx src/cli/prepare.ts workspace)",
+      "Bash(/Users/lixiangyang/.claude/plugins/cache/claude-plugins-official/superpowers/6.0.3/skills/subagent-driven-development/scripts/task-brief docs/superpowers/plans/2026-06-24-opencodereview-plugin.md 10)",
+      "Bash(/Users/lixiangyang/.claude/plugins/cache/claude-plugins-official/superpowers/6.0.3/skills/subagent-driven-development/scripts/task-brief docs/superpowers/plans/2026-06-24-opencodereview-plugin.md 11)"
     ]
   }
 }
