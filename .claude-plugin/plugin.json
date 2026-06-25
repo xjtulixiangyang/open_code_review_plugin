@@ -6,7 +6,5 @@
     "name": "open-code-review-plugin contributors"
   },
   "commands": "./commands",
-  "skills": "./skills",
-  "agents": "./agents",
-  "hooks": "./hooks/hooks.json"
+  "skills": "./skills"
 }

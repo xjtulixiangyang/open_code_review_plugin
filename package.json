@@ -11,7 +11,11 @@
   "files": [
     ".claude-plugin",
     "commands",
+    "agents",
     "skills",
+    "hooks",
+    "bin",
+    "assets",
     "dist",
     "README.md",
     "LICENSE"
