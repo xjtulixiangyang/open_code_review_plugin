@@ -25,6 +25,7 @@
     "build": "npm run clean && npm run build:tsc && npm run build:assets && npm run build:mjs && npm run build:bin",
     "typecheck": "tsc --noEmit",
     "test": "node --import tsx --test src/**/__tests__/*.test.ts",
+    "smoke": "bash scripts/smoke.sh",
     "preview": "ls -la dist/ bin/"
   },
   "keywords": [
