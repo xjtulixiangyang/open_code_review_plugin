@@ -1,0 +1,162 @@
+{
+  "v": 2,
+  "models": {
+    "wf_sdd_sdd-ca": {
+      "multi": false,
+      "steps": {
+        "sdd-ca_sdd-init": {
+          "s": "done",
+          "t": 1782208713279
+        },
+        "sdd-init": {
+          "s": "done",
+          "t": 1782208713279
+        },
+        "codespec/changes/refactor-as-plugin/init.md": {
+          "s": "done",
+          "t": 1782208713279
+        },
+        "sdd-ca_sdd-delta-spec": {
+          "s": "pending",
+          "t": 1782208713279
+        },
+        "sdd-delta-spec": {
+          "s": "pending",
+          "t": 1782208713279
+        },
+        "delta-spec.md": {
+          "s": "pending",
+          "t": 1782208713279
+        },
+        "sdd-ca_sdd-delta-design": {
+          "s": "pending",
+          "t": 1782208713279
+        },
+        "sdd-delta-design": {
+          "s": "pending",
+          "t": 1782208713279
+        },
+        "delta-design.md": {
+          "s": "pending",
+          "t": 1782208713279
+        },
+        "sdd-ca_sdd-task": {
+          "s": "pending",
+          "t": 1782208713279
+        },
+        "sdd-task": {
+          "s": "pending",
+          "t": 1782208713279
+        },
+        "task.md": {
+          "s": "pending",
+          "t": 1782208713279
+        },
+        "init.md": {
+          "s": "pending",
+          "t": 1782207716658,
+          "e": "执行已取消"
+        }
+      }
+    },
+    "wf-ocr-plugin-bu": {
+      "multi": false,
+      "steps": {
+        "init": {
+          "s": "done",
+          "t": 1782229145521,
+          "e": "执行已取消"
+        },
+        "sdd-init": {
+          "s": "done",
+          "t": 1782229145521,
+          "e": "执行已取消"
+        },
+        "codespec/changes/refactor-as-plugin/init.md": {
+          "s": "done",
+          "t": 1782229145521,
+          "e": "执行已取消"
+        },
+        "proposal": {
+          "s": "done",
+          "t": 1782229145521,
+          "e": "执行已取消"
+        },
+        "sdd-proposal": {
+          "s": "done",
+          "t": 1782229145521,
+          "e": "执行已取消"
+        },
+        "codespec/changes/refactor-as-plugin/proposal.md": {
+          "s": "done",
+          "t": 1782229145521,
+          "e": "执行已取消"
+        },
+        "spec": {
+          "s": "pending",
+          "t": 1782229145521
+        },
+        "sdd-delta-spec": {
+          "s": "pending",
+          "t": 1782229145521
+        },
+        "codespec/changes/refactor-as-plugin/spec.md": {
+          "s": "pending",
+          "t": 1782229145521
+        },
+        "design": {
+          "s": "pending",
+          "t": 1782229145521
+        },
+        "sdd-delta-design": {
+          "s": "pending",
+          "t": 1782229145521
+        },
+        "codespec/changes/refactor-as-plugin/design.md": {
+          "s": "pending",
+          "t": 1782229145521
+        },
+        "tasks": {
+          "s": "pending",
+          "t": 1782229145521
+        },
+        "sdd-task": {
+          "s": "pending",
+          "t": 1782229145521
+        },
+        "codespec/changes/refactor-as-plugin/task.md": {
+          "s": "pending",
+          "t": 1782229145521
+        },
+        "gen-testcases": {
+          "s": "pending",
+          "t": 1782229145521
+        },
+        "codespec/changes/refactor-as-plugin/testcases.md": {
+          "s": "pending",
+          "t": 1782229145521
+        },
+        "run-tests": {
+          "s": "pending",
+          "t": 1782229145521
+        },
+        "sdd-validation": {
+          "s": "pending",
+          "t": 1782229145521
+        },
+        "codespec/changes/refactor-as-plugin/test-report.md": {
+          "s": "pending",
+          "t": 1782229145521
+        },
+        "fix-bugs": {
+          "s": "pending",
+          "t": 1782229145521
+        },
+        "codespec/changes/refactor-as-plugin/fix-log.md": {
+          "s": "pending",
+          "t": 1782229145521
+        }
+      }
+    }
+  }
+}

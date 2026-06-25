@@ -1,0 +1,45 @@
+{
+  "name": "open-code-review-plugin",
+  "version": "0.1.0",
+  "description": "Claude Code plugin — AI-powered code review for git diffs. Provides deterministic diff parsing, rule matching and Markdown report rendering; all LLM decisions are delegated to the host Claude Code session.",
+  "type": "module",
+  "private": true,
+  "main": "./dist/index.mjs",
+  "exports": {
+    ".": "./dist/index.mjs"
+  },
+  "files": [
+    ".claude-plugin",
+    "commands",
+    "skills",
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "clean": "rm -rf dist",
+    "build:tsc": "tsc -p tsconfig.json",
+    "build:mjs": "node scripts/build-mjs.mjs",
+    "build": "npm run clean && npm run build:tsc && npm run build:mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test src/**/__tests__/*.test.ts",
+    "preview": "ls -la dist/"
+  },
+  "keywords": [
+    "claude-code",
+    "claude-code-plugin",
+    "plugin",
+    "code-review",
+    "git-diff",
+    "ai"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "Apache-2.0",
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "tsx": "^4.16.0",
+    "typescript": "^5.5.0"
+  }
+}

@@ -1,0 +1,70 @@
+{
+  "v": 2,
+  "models": {
+    "wf-ocr-plugin": {
+      "multi": false,
+      "steps": {
+        "init": {
+          "s": "done",
+          "t": 1782173833780
+        },
+        "sdd-init": {
+          "s": "done",
+          "t": 1782173833780
+        },
+        "init.md": {
+          "s": "done",
+          "t": 1782173833780
+        },
+        "proposal": {
+          "s": "pending",
+          "t": 1782173833780
+        },
+        "sdd-proposal": {
+          "s": "pending",
+          "t": 1782173833780
+        },
+        "proposal.md": {
+          "s": "pending",
+          "t": 1782173833780
+        },
+        "spec": {
+          "s": "pending",
+          "t": 1782173833780
+        },
+        "sdd-delta-spec": {
+          "s": "pending",
+          "t": 1782173833780
+        },
+        "delta-spec.md": {
+          "s": "pending",
+          "t": 1782173833780
+        },
+        "design": {
+          "s": "pending",
+          "t": 1782173833780
+        },
+        "sdd-delta-design": {
+          "s": "pending",
+          "t": 1782173833780
+        },
+        "delta-design.md": {
+          "s": "pending",
+          "t": 1782173833780
+        },
+        "task": {
+          "s": "pending",
+          "t": 1782173833780
+        },
+        "sdd-task": {
+          "s": "pending",
+          "t": 1782173833780
+        },
+        "task.md": {
+          "s": "pending",
+          "t": 1782173833780
+        }
+      }
+    }
+  }
+}

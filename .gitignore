@@ -1,0 +1,23 @@
+# Build artifacts
+dist/
+bin/*
+!bin/.gitkeep
+
+# Node
+node_modules/
+npm-debug.log*
+
+# Runtime
+.ocr-runs/
+.superpowers/
+
+# OS
+.DS_Store
+
+# Editor
+.vscode/
+.idea/
+
+# Legacy debug logs
+.claude-sdk-debug.log
+latest

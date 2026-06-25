@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(grep -nE 'TBD|TODO|FIXME|XXX|\\\\?\\\\?\\\\?|占位符$|待补|待定' /Users/lixiangyang/Desktop/代码/open-code-review-plugin/docs/superpowers/specs/2026-06-24-opencodereview-plugin-design.md)",
+      "Bash(/Users/lixiangyang/.claude/plugins/cache/claude-plugins-official/superpowers/6.0.3/skills/brainstorming/scripts/stop-server.sh /Users/lixiangyang/Desktop/代码/open-code-review-plugin/.superpowers/brainstorm/30722-1782293409)",
+      "Bash(awk '/^### Task 1:/,/^### Task 2:/')",
+      "Read(//tmp/ocrp-sdd/**)",
+      "Bash(awk '/^### Task 1:/,/^### Task 2:/' /Users/lixiangyang/Desktop/代码/open-code-review-plugin/docs/superpowers/plans/2026-06-24-opencodereview-plugin.md)",
+      "Bash(git init *)",
+      "Bash(git *)",
+      "Bash(npm install *)",
+      "Bash(npm test *)"
+    ]
+  }
+}

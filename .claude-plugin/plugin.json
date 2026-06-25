@@ -1,0 +1,12 @@
+{
+  "name": "open-code-review",
+  "version": "0.1.0",
+  "description": "AI-powered code review plugin for Claude Code. Reuses alibaba/open-code-review review semantics; delegates all LLM reasoning to the host Claude Code agent loop.",
+  "author": {
+    "name": "open-code-review-plugin contributors"
+  },
+  "commands": "./commands",
+  "skills": "./skills",
+  "agents": "./agents",
+  "hooks": "./hooks/hooks.json"
+}
