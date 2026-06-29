@@ -42,14 +42,14 @@ Inside Claude Code:
 | `<sha>` or `--commit <sha>` | single commit vs its parent |
 | `<from>..<to>` or `--from <a> --to <b>` | range |
 
-| Flag | Equivalent OCR flag | Default |
-|---|---|---|
-| `-b, --background "ctx"` | same | "" |
-| `--paths "g1,g2"` | `--include` | — |
-| `--rules <path>` | `--rule` | (built-in) |
-| `--concurrency <n>` | same | 8 |
-| `--format markdown|json|both` | `--format` | both |
-| `--dry-run` | — | false |
+| Flag | Equivalent OCR flag | Default | P0 behavior |
+|---|---|---|---|---|
+| `-b, --background "ctx"` | same | "" | Injected into reviewer prompt |
+| `--paths "g1,g2"` | include/path filter | — | Limits changed files before review |
+| `--concurrency <n>` | same | 8 | Instructs command orchestration to dispatch at most N reviewers |
+| `--format markdown|json|both` | `--format` | both | Controls aggregate artifacts |
+
+P1 planned flags are parsed defensively but rejected in P0 with `OCRP-RUN-011`: `--rules`, `--preview` / `-p`, and `--dry-run`. This prevents silent false support until custom rules and preview mode are implemented.
 
 ## 4. Architecture
 
@@ -65,6 +65,8 @@ In brief:
 5. A PostToolUse hook (`hooks/hooks.json`) mirrors Bash tool calls to
    `.ocr-runs/<runId>/events.jsonl` (durable bus) and prints live progress.
 6. `bin/ocr-aggregate` reads `comments.jsonl` + `done/` → `report.md` + `report.json`.
+
+JSON reports keep OCR-compatible token summary fields, but P0 sets token counters to `0` because this plugin delegates all model calls to the host Claude Code session and does not receive per-call token accounting from a bundled LLM client.
 
 ## 5. Comparison with OCR CLI
 
@@ -95,7 +97,7 @@ P1 (planned): `.code-review.yaml` at repo root, falling back to
 |---|---|---|
 | `OCRP-LOAD-002` | `dist/` missing | `npm run build` |
 | `OCRP-RUN-010` | Not in a git repo | `cd` to a repo root |
-| `OCRP-RUN-011` | Argument conflict | Use only one of --staged / --commit / range |
+| `OCRP-RUN-011` | Argument conflict or unsupported P0 flag | Use only one review target and avoid P1 flags such as --rules/--preview/--dry-run |
 | `OCRP-RUN-012` | No changes | Stage something or pick a non-trivial range |
 | `OCRP-SKILL-040` | PLAN output unparseable | Already downgraded; main review still runs |
 | `OCRP-SUB-050/051` | Some subagents did not finish | Report flagged `partial: true` |

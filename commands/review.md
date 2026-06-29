@@ -24,12 +24,12 @@ ocr-prepare $ARGUMENTS
 
 Capture the stdout JSON. It contains `runId`, `fileCount`, `hunkCount`, `changedLines`, `contextPath`.
 
-If `fileCount` is 0 → tell the user "No changes to review." and stop.
+If `fileCount` is 0 → tell the user "No changes to review." and stop. This is a successful skipped review, not a hard failure.
 If the command exits non-zero → surface the stderr to the user and stop.
 
-### Step 2 — Plan (only when changedLines > 50)
+### Step 2 — Plan (only when changedLines >= 50)
 
-If `changedLines > 50`:
+If `changedLines >= 50`:
 
 1. Read `.ocr-runs/<runId>/context.json` to load the ReviewContext.
 2. Invoke the `ocr-plan` skill with the runId. Its output should be a fenced ```json block containing PlanOutput.
@@ -46,7 +46,11 @@ Otherwise skip this step.
 
 For each file in `context.files[]`:
 
-1. Compute `planGuidance` — if `plan.json` exists, extract the issues whose `description`, `tool_guidance.arguments`, or `tool_guidance.reason` mention this file's path, plus any with `file_hint == path`. Format as a Markdown bullet list sorted high→medium→low. If empty, use "".
+1. Compute `planGuidance` deterministically. If `.ocr-runs/<runId>/plan.json` exists, run:
+   ```bash
+   ocr-plan-guidance --runId <runId> --path <currentFilePath>
+   ```
+   Parse stdout JSON and use its `guidance` field. If the command fails, set `planGuidance = ""` and mention `OCRP-SKILL-040` in the final report. Do not manually re-implement plan filtering in the main conversation.
 2. Dispatch a `ocr-reviewer` subagent (via the Task tool) with a prompt containing exactly:
 
    ```
@@ -71,10 +75,12 @@ Cap concurrency at 8 (override with the `--concurrency <n>` flag in $ARGUMENTS).
 After all reviewer subagents return (each ends with `done: <path>`), run Bash:
 
 ```bash
-ocr-aggregate --runId <runId>
+ocr-aggregate --runId <runId> --format <markdown|json|both>
 ```
 
 The stdout JSON contains `reportMd`, `reportJson`, `partial`, `partialFiles`.
+
+If no format flag was provided to `ocr-prepare`, use `both`.
 
 ### Step 5 — Present to user
 
@@ -92,7 +98,7 @@ If `partial == true`, prefix your message with: `⚠️ Some files did not compl
 |---|---|
 | OCRP-LOAD-002 | "Plugin not built — please run `npm run build` in the plugin directory." |
 | OCRP-RUN-010 | "Not a git repository at `<cwd>`. Run `/review` inside a git repo." |
-| OCRP-RUN-011 | "Argument conflict: <message>. Use only one of --staged / --commit / --from..--to." |
+| OCRP-RUN-011 | "Argument conflict or unsupported P0 flag: <message>. Use only one review target and avoid P1 flags such as --rules/--preview/--dry-run." |
 | OCRP-RUN-012 | "No changes to review." (exit 0) |
 | OCRP-SKILL-040 | Continue without plan_guidance; mention in the final report. |
 | OCRP-SUB-050/051 | Already surfaced by `ocr-aggregate` as partial. |

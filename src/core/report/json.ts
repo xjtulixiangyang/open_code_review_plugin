@@ -5,7 +5,7 @@ import type { CommentRecord, LlmComment } from '../model/comment.js';
  * OCR-compatible report JSON. 字段与 OCR `cmd/opencodereview/output.go::outputJSONWithWarnings` 对齐。
  */
 export interface ReportJson {
-  status: 'ok' | 'partial' | 'error';
+  status: 'success' | 'skipped' | 'completed_with_warnings' | 'completed_with_errors';
   message?: string;
   summary: {
     files_reviewed: number;
@@ -31,7 +31,7 @@ export function renderJsonReport(
     return rest;
   });
   const r: ReportJson = {
-    status: opts.partialFiles.length > 0 ? 'partial' : 'ok',
+    status: opts.partialFiles.length > 0 ? 'completed_with_warnings' : 'success',
     summary: {
       files_reviewed: ctx.files.length,
       comments: lite.length,

@@ -11,11 +11,9 @@ interface ParsedArgs {
   to?: string;
   paths?: string[];
   background?: string;
-  rules?: string;
   format?: 'markdown' | 'json' | 'both';
   concurrency?: number;
-  dryRun?: boolean;
-  preview?: boolean;
+  unsupported: string[];
 }
 
 function parseArgs(argv: string[]): ParsedArgs {
@@ -24,7 +22,7 @@ function parseArgs(argv: string[]): ParsedArgs {
   //   --paths <glob1,glob2> | --background "..." | --rules <path>
   //   --format text|json|both | --concurrency <n> | --dry-run | --preview
   // 位置参数：第一个非 flag 视为 "staged" / "HEAD~3" 等便捷形式
-  const out: ParsedArgs = { mode: 'workspace' };
+  const out: ParsedArgs = { mode: 'workspace', unsupported: [] };
   let i = 0;
   while (i < argv.length) {
     const a = argv[i];
@@ -41,12 +39,16 @@ function parseArgs(argv: string[]): ParsedArgs {
       out.to = next();
     } else if (a === '--paths') out.paths = next().split(',');
     else if (a === '--background' || a === '-b') out.background = next();
-    else if (a === '--rules') out.rules = next();
-    else if (a === '--format' || a === '-f') out.format = next() as ParsedArgs['format'];
+    else if (a === '--rules') {
+      out.unsupported.push('--rules is planned for P1 custom rule loading');
+      next();
+    } else if (a === '--format' || a === '-f') out.format = next() as ParsedArgs['format'];
     else if (a === '--concurrency') out.concurrency = parseInt(next(), 10);
-    else if (a === '--dry-run') out.dryRun = true;
-    else if (a === '--preview' || a === '-p') out.preview = true;
-    else if (!a.startsWith('-')) {
+    else if (a === '--dry-run') {
+      out.unsupported.push('--dry-run is planned for P1 preview mode');
+    } else if (a === '--preview' || a === '-p') {
+      out.unsupported.push(`${a} is planned for P1 preview mode`);
+    } else if (!a.startsWith('-')) {
       // 位置参数便捷形式
       if (a === 'staged') out.mode = 'staged';
       else if (a === 'workspace') out.mode = 'workspace';
@@ -68,6 +70,9 @@ function parseArgs(argv: string[]): ParsedArgs {
 
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
+  if (args.unsupported.length > 0) {
+    throw new Error(`OCRP-RUN-011: unsupported P0 flag: ${args.unsupported.join('; ')}`);
+  }
   const req: ReviewRequest = {
     repoRoot: process.cwd(),
     mode: args.mode,
@@ -76,8 +81,6 @@ async function main(): Promise<void> {
     to: args.to,
     paths: args.paths,
     background: args.background,
-    rulesPath: args.rules,
-    dryRun: args.dryRun,
     format: args.format,
     concurrency: args.concurrency,
   };
