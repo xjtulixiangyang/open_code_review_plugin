@@ -27,9 +27,9 @@ Capture the stdout JSON. It contains `runId`, `fileCount`, `hunkCount`, `changed
 If `fileCount` is 0 → tell the user "No changes to review." and stop.
 If the command exits non-zero → surface the stderr to the user and stop.
 
-### Step 2 — Plan (only when changedLines > 50)
+### Step 2 — Plan (only when changedLines >= 50)
 
-If `changedLines > 50`:
+If `changedLines >= 50`:
 
 1. Read `.ocr-runs/<runId>/context.json` to load the ReviewContext.
 2. Invoke the `ocr-plan` skill with the runId. Its output should be a fenced ```json block containing PlanOutput.
@@ -75,10 +75,12 @@ Cap concurrency at 8 (override with the `--concurrency <n>` flag in $ARGUMENTS).
 After all reviewer subagents return (each ends with `done: <path>`), run Bash:
 
 ```bash
-ocr-aggregate --runId <runId>
+ocr-aggregate --runId <runId> --format <markdown|json|both>
 ```
 
 The stdout JSON contains `reportMd`, `reportJson`, `partial`, `partialFiles`.
+
+If no format flag was provided to `ocr-prepare`, use `both`.
 
 ### Step 5 — Present to user
 

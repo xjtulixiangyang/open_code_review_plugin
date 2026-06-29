@@ -5,7 +5,7 @@ description: |
   ReviewContext file from .ocr-runs/<runId>/context.json. Output: a JSON
   object with {change_summary, issues[]}, written to plan.json.
   Use only when the host /open-code-review:review command requests it
-  (triggered by totalChangedLines > 50).
+  (triggered by totalChangedLines >= 50).
 ---
 
 # OCR Plan Skill

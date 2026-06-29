@@ -24,7 +24,7 @@ const COMMENTS: CommentRecord[] = [
 test('renderJsonReport uses success status when all files complete', () => {
   const json = JSON.parse(renderJsonReport(CTX, COMMENTS, { partialFiles: [], durationMs: 12 }));
 
-  assert.equal(json.status, 'success');
+  assert.equal(json.status, 'ok');
   assert.equal(json.summary.files_reviewed, 2);
   assert.equal(json.summary.comments, 1);
   assert.equal(json.summary.total_tokens, 0);
