@@ -13,7 +13,7 @@ export async function buildReviewContext(req: ReviewRequest): Promise<ReviewCont
   let diffText: string;
   let rangeLabel: string;
   if (req.mode === 'workspace') {
-    diffText = await collectWorkspaceDiff(repoRoot);
+    diffText = await collectWorkspaceDiff(repoRoot, req.paths);
     rangeLabel = 'workspace';
   } else if (req.mode === 'staged') {
     diffText = await gitDiff({ repoRoot, range: 'staged', paths: req.paths });
