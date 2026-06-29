@@ -46,7 +46,11 @@ Otherwise skip this step.
 
 For each file in `context.files[]`:
 
-1. Compute `planGuidance` — if `plan.json` exists, extract the issues whose `description`, `tool_guidance.arguments`, or `tool_guidance.reason` mention this file's path, plus any with `file_hint == path`. Format as a Markdown bullet list sorted high→medium→low. If empty, use "".
+1. Compute `planGuidance` deterministically. If `.ocr-runs/<runId>/plan.json` exists, run:
+   ```bash
+   ocr-plan-guidance --runId <runId> --path <currentFilePath>
+   ```
+   Parse stdout JSON and use its `guidance` field. If the command fails, set `planGuidance = ""` and mention `OCRP-SKILL-040` in the final report. Do not manually re-implement plan filtering in the main conversation.
 2. Dispatch a `ocr-reviewer` subagent (via the Task tool) with a prompt containing exactly:
 
    ```

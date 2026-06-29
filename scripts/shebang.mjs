@@ -45,6 +45,7 @@ async function main() {
       prepare: 'ocr-prepare',
       aggregate: 'ocr-aggregate',
       rules_check: 'ocr-rules-check',
+      plan_guidance: 'ocr-plan-guidance',
     };
     const binName = map[stem] ?? stem;
     const target = join(binDir, binName);
