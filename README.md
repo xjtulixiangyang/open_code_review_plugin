@@ -66,6 +66,8 @@ In brief:
    `.ocr-runs/<runId>/events.jsonl` (durable bus) and prints live progress.
 6. `bin/ocr-aggregate` reads `comments.jsonl` + `done/` → `report.md` + `report.json`.
 
+JSON reports keep OCR-compatible token summary fields, but P0 sets token counters to `0` because this plugin delegates all model calls to the host Claude Code session and does not receive per-call token accounting from a bundled LLM client.
+
 ## 5. Comparison with OCR CLI
 
 | Capability | OCR CLI | This plugin |
