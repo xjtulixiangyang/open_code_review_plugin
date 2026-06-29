@@ -63,7 +63,7 @@ if [ ! -f ".ocr-runs/$RUNID/report.json" ]; then
 fi
 
 grep -q "Magic string" ".ocr-runs/$RUNID/report.md" || { echo "[smoke] FAIL: comment not in report.md"; exit 1; }
-grep -q '"status": "ok"' ".ocr-runs/$RUNID/report.json" || { echo "[smoke] FAIL: report.json status != ok"; exit 1; }
+grep -q '"status": "success"' ".ocr-runs/$RUNID/report.json" || { echo "[smoke] FAIL: report.json status != success"; exit 1; }
 
 # rules_check 冒烟
 RC="$($PLUGIN_ROOT/bin/ocr-rules-check a.ts)"
