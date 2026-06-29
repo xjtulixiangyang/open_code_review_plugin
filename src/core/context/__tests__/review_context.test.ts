@@ -59,3 +59,15 @@ test('workspace mode honors multiple paths across tracked and untracked files', 
     await rm(repo, { recursive: true, force: true });
   }
 });
+
+test('buildReviewContext reports OCRP-RUN-010 outside a git repository', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'ocrp-not-git-'));
+  try {
+    await assert.rejects(
+      buildReviewContext({ repoRoot: dir, mode: 'workspace' }),
+      /OCRP-RUN-010: Not a git repository/,
+    );
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
