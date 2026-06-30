@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { randomUUID } from 'node:crypto';
 import { appendComment } from '../core/runs/store.js';
 import type { CommentRecord } from '../core/model/comment.js';
 
@@ -26,6 +27,7 @@ async function main(): Promise<void> {
     }
   }
   const rec: CommentRecord = {
+    comment_id: `c-${randomUUID()}`,
     path: f.path,
     start_line: parseInt(f.start, 10),
     end_line: parseInt(f.end, 10),
@@ -40,7 +42,7 @@ async function main(): Promise<void> {
   };
   await appendComment(f.runId, rec);
   process.stdout.write(
-    JSON.stringify({ ok: true, path: rec.path, start: rec.start_line, end: rec.end_line }) + '\n',
+    JSON.stringify({ ok: true, path: rec.path, start: rec.start_line, end: rec.end_line, comment_id: rec.comment_id }) + '\n',
   );
 }
 

@@ -15,6 +15,7 @@ export interface LlmComment {
 
 /** jsonl 一行的完整内容 (LlmComment + 元数据)。 */
 export interface CommentRecord extends LlmComment {
+  comment_id: string;
   _meta?: {
     subagent?: string;
     ts?: string;
