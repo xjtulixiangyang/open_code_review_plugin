@@ -3,6 +3,7 @@ import {
   readContext,
   readComments,
   readFilterResults,
+  readRelocationResults,
   listDone,
   writeReport,
 } from '../core/runs/store.js';
@@ -10,6 +11,7 @@ import { renderMarkdownReport } from '../core/report/markdown.js';
 import { renderJsonReport } from '../core/report/json.js';
 import type { ReviewContext } from '../core/model/request.js';
 import type { CommentRecord } from '../core/model/comment.js';
+import type { RelocationWarning } from '../core/model/relocation.js';
 
 function parseFlags(argv: string[]): Record<string, string> {
   const out: Record<string, string> = {};
@@ -67,14 +69,80 @@ async function main(): Promise<void> {
   const partialFiles: string[] = [];
   for (const p of expected) if (!doneFiles.has(p)) partialFiles.push(p);
 
+  // --- Relocation pass ---
+  const relocationData = await readRelocationResults(f.runId);
+  const relocationWarnings: RelocationWarning[] = [...relocationData.warnings];
+  let relocatedCount = 0;
+  let relocationFallbackCount = 0;
+
+  // Build a map: path -> Map<comment_id, RelocationDecision>
+  const relocByPath = new Map<string, Map<string, { resolved_start_line: number; resolved_end_line: number; source: string }>>();
+  for (const result of relocationData.results) {
+    const pathMap = new Map<string, { resolved_start_line: number; resolved_end_line: number; source: string }>();
+    for (const decision of result.decisions) {
+      pathMap.set(decision.comment_id, {
+        resolved_start_line: decision.resolved_start_line,
+        resolved_end_line: decision.resolved_end_line,
+        source: decision.source,
+      });
+    }
+    relocByPath.set(result.path, pathMap);
+  }
+
+  // Apply relocations to visible comments
+  for (const comment of comments) {
+    const pathMap = relocByPath.get(comment.path);
+    if (!pathMap) continue;
+    const decision = pathMap.get(comment.comment_id);
+    if (!decision) continue;
+    comment.start_line = decision.resolved_start_line;
+    comment.end_line = decision.resolved_end_line;
+    if (decision.source === 'fallback_original') {
+      relocationFallbackCount++;
+    } else if (decision.source !== 'unchanged') {
+      relocatedCount++;
+    }
+  }
+
+  // Check for unknown/mismatched decisions
+  for (const result of relocationData.results) {
+    const pathComments = comments.filter((c) => c.path === result.path);
+    const pathCommentIds = new Set(pathComments.map((c) => c.comment_id));
+    for (const decision of result.decisions) {
+      if (!pathCommentIds.has(decision.comment_id)) {
+        relocationWarnings.push({
+          kind: 'relocation_comment_missing',
+          path: result.path,
+          comment_id: decision.comment_id,
+          detail: `relocation decision references unknown or hidden comment_id: ${decision.comment_id}`,
+        });
+      }
+    }
+  }
+
   const dur = Date.now() - start;
 
   if (format === 'markdown' || format === 'both') {
-    const md = renderMarkdownReport(ctx, comments, { partialFiles, rawCommentCount: rawComments.length, filteredCommentCount });
+    const md = renderMarkdownReport(ctx, comments, {
+      partialFiles,
+      rawCommentCount: rawComments.length,
+      filteredCommentCount,
+      relocatedCount,
+      relocationFallbackCount,
+    });
     await writeReport(f.runId, 'report.md', md);
   }
   if (format === 'json' || format === 'both') {
-    const j = renderJsonReport(ctx, comments, { partialFiles, durationMs: dur, rawCommentCount: rawComments.length, filteredCommentCount, filterWarnings });
+    const j = renderJsonReport(ctx, comments, {
+      partialFiles,
+      durationMs: dur,
+      rawCommentCount: rawComments.length,
+      filteredCommentCount,
+      filterWarnings,
+      relocatedCount,
+      relocationFallbackCount,
+      relocationWarnings,
+    });
     await writeReport(f.runId, 'report.json', j);
   }
   process.stdout.write(
@@ -88,6 +156,7 @@ async function main(): Promise<void> {
       commentCount: comments.length,
       filteredCommentCount,
       filterWarnings,
+      relocationWarnings,
       partialFiles,
     }, null, 2) + '\n',
   );

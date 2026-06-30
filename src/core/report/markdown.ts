@@ -5,6 +5,8 @@ export interface RenderOpts {
   partialFiles: string[];
   rawCommentCount?: number;
   filteredCommentCount?: number;
+  relocatedCount?: number;
+  relocationFallbackCount?: number;
 }
 
 /**
@@ -39,6 +41,14 @@ export function renderMarkdownReport(
   lines.push(`**Issues found**: ${comments.length}`);
   if ((opts.filteredCommentCount ?? 0) > 0) {
     lines.push(`**Filtered**: ${opts.filteredCommentCount} (hidden from raw ${opts.rawCommentCount ?? comments.length})  `);
+  }
+  const relocCount = opts.relocatedCount ?? 0;
+  const fbCount = opts.relocationFallbackCount ?? 0;
+  if (relocCount > 0 || fbCount > 0) {
+    const parts: string[] = [];
+    if (relocCount > 0) parts.push(`${relocCount}`);
+    if (fbCount > 0) parts.push(`fallback ${fbCount}`);
+    lines.push(`**Relocated**: ${parts.join(', ')}  `);
   }
   lines.push('');
 

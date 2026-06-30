@@ -1,6 +1,7 @@
 import type { ReviewContext } from '../model/request.js';
 import type { CommentRecord, LlmComment } from '../model/comment.js';
 import type { FilterWarning } from '../model/filter.js';
+import type { RelocationWarning } from '../model/relocation.js';
 
 export type ReportComment = LlmComment & { comment_id?: string };
 
@@ -15,6 +16,8 @@ export interface ReportJson {
     comments: number;
     raw_comments: number;
     filtered_comments: number;
+    relocated_comments?: number;
+    relocation_fallbacks?: number;
     input_tokens: number;
     output_tokens: number;
     total_tokens: number;
@@ -25,12 +28,22 @@ export interface ReportJson {
   comments: ReportComment[];
   warnings: Array<{ path: string; reason: string }>;
   filter_warnings?: FilterWarning[];
+  relocation_warnings?: RelocationWarning[];
 }
 
 export function renderJsonReport(
   ctx: ReviewContext,
   comments: CommentRecord[],
-  opts: { partialFiles: string[]; durationMs: number; rawCommentCount?: number; filteredCommentCount?: number; filterWarnings?: FilterWarning[] },
+  opts: {
+    partialFiles: string[];
+    durationMs: number;
+    rawCommentCount?: number;
+    filteredCommentCount?: number;
+    filterWarnings?: FilterWarning[];
+    relocatedCount?: number;
+    relocationFallbackCount?: number;
+    relocationWarnings?: RelocationWarning[];
+  },
 ): string {
   const lite: ReportComment[] = comments.map((c) => {
     const { _meta, ...rest } = c;
@@ -43,6 +56,8 @@ export function renderJsonReport(
       comments: lite.length,
       raw_comments: opts.rawCommentCount ?? lite.length,
       filtered_comments: opts.filteredCommentCount ?? 0,
+      relocated_comments: opts.relocatedCount ?? 0,
+      relocation_fallbacks: opts.relocationFallbackCount ?? 0,
       input_tokens: 0,
       output_tokens: 0,
       total_tokens: 0,
@@ -54,5 +69,6 @@ export function renderJsonReport(
     warnings: opts.partialFiles.map((p) => ({ path: p, reason: 'subagent did not call task_done' })),
   };
   if (opts.filterWarnings && opts.filterWarnings.length > 0) r.filter_warnings = opts.filterWarnings;
+  if (opts.relocationWarnings && opts.relocationWarnings.length > 0) r.relocation_warnings = opts.relocationWarnings;
   return JSON.stringify(r, null, 2);
 }
