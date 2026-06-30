@@ -46,7 +46,15 @@ if [ ! -f ".ocr-runs/$RUNID/context.json" ]; then
 fi
 
 # 模拟 reviewer subagent 行为
-"$PLUGIN_ROOT/bin/code_comment" --runId "$RUNID" --path a.ts --start 2 --end 2 --content "Magic string" --subagent reviewer-a >/dev/null
+COMMENT_KEEP="$($PLUGIN_ROOT/bin/code_comment --runId "$RUNID" --path a.ts --start 2 --end 2 --content "Magic string" --subagent reviewer-a)"
+COMMENT_HIDE="$($PLUGIN_ROOT/bin/code_comment --runId "$RUNID" --path a.ts --start 2 --end 2 --content "Duplicate noise" --subagent reviewer-a)"
+HIDE_ID="$(echo "$COMMENT_HIDE" | grep -o '"comment_id":"[^"]*"' | head -1 | cut -d'"' -f4)"
+if [ -z "$HIDE_ID" ]; then
+  echo "[smoke] FAIL: no comment_id in code_comment output"
+  exit 1
+fi
+FILTER_INPUT="{\"path\":\"a.ts\",\"decisions\":[{\"comment_id\":\"$HIDE_ID\",\"action\":\"hide\",\"reason\":\"duplicate smoke comment\"}]}"
+"$PLUGIN_ROOT/bin/ocr-filter-apply" --runId "$RUNID" --path a.ts --input "$FILTER_INPUT" --subagent filter-a >/dev/null
 "$PLUGIN_ROOT/bin/task_done" --runId "$RUNID" --subagent reviewer-a --file a.ts >/dev/null
 
 # 跑 aggregate
@@ -62,8 +70,13 @@ if [ ! -f ".ocr-runs/$RUNID/report.json" ]; then
   exit 1
 fi
 
-grep -q "Magic string" ".ocr-runs/$RUNID/report.md" || { echo "[smoke] FAIL: comment not in report.md"; exit 1; }
+grep -q "Magic string" ".ocr-runs/$RUNID/report.md" || { echo "[smoke] FAIL: kept comment not in report.md"; exit 1; }
+if grep -q "Duplicate noise" ".ocr-runs/$RUNID/report.md"; then
+  echo "[smoke] FAIL: hidden comment present in report.md"
+  exit 1
+fi
 grep -q '"status": "success"' ".ocr-runs/$RUNID/report.json" || { echo "[smoke] FAIL: report.json status != success"; exit 1; }
+grep -q '"filtered_comments": 1' ".ocr-runs/$RUNID/report.json" || { echo "[smoke] FAIL: report.json filtered_comments != 1"; exit 1; }
 
 # rules_check 冒烟
 RC="$($PLUGIN_ROOT/bin/ocr-rules-check a.ts)"

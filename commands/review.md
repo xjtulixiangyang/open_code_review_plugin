@@ -70,6 +70,20 @@ For each file in `context.files[]`:
 
 Cap concurrency at 8 (override with the `--concurrency <n>` flag in $ARGUMENTS).
 
+### Step 3.5 — Per-file filter (REVIEW_FILTER_TASK)
+
+After each file's reviewer subagent returns, run the filter stage for that file:
+
+1. Read `.ocr-runs/<runId>/comments.jsonl` and select comments where `path == currentFilePath`, keeping `comment_id`.
+2. If the file has zero comments, skip filter for this file.
+3. Otherwise invoke the `ocr-review-filter` skill with exactly: runId, subagent `filter-<index>`, currentFilePath, currentFileDiff, requirementBackground, systemRule, planGuidance, and candidateComments.
+4. Capture the skill's fenced ```json output. It must be a FilterFileResult without `_meta`.
+5. Run Bash:
+   ```bash
+   ocr-filter-apply --runId <runId> --path <currentFilePath> --input '<json string>' --subagent filter-<index>
+   ```
+6. If the skill output is unparseable or `ocr-filter-apply` exits non-zero, treat it as a soft failure: continue without filtering this file and mention `OCRP-FILTER-070` in the final report.
+
 ### Step 4 — Aggregate
 
 After all reviewer subagents return (each ends with `done: <path>`), run Bash:
@@ -78,7 +92,7 @@ After all reviewer subagents return (each ends with `done: <path>`), run Bash:
 ocr-aggregate --runId <runId> --format <markdown|json|both>
 ```
 
-The stdout JSON contains `reportMd`, `reportJson`, `partial`, `partialFiles`.
+The stdout JSON contains `reportMd`, `reportJson`, `partial`, `partialFiles`, `rawCommentCount`, `commentCount`, `filteredCommentCount`, and `filterWarnings`.
 
 If no format flag was provided to `ocr-prepare`, use `both`.
 
@@ -89,6 +103,7 @@ Read `.ocr-runs/<runId>/report.md` and reply with its full contents inline. Also
 - `<repo>/.ocr-runs/<runId>/report.md`
 - `<repo>/.ocr-runs/<runId>/report.json`
 - `<repo>/.ocr-runs/<runId>/comments.jsonl`
+- `<repo>/.ocr-runs/<runId>/filters/` (when any comments were filtered)
 
 If `partial == true`, prefix your message with: `⚠️ Some files did not complete review; see Warnings section.`
 
@@ -103,3 +118,6 @@ If `partial == true`, prefix your message with: `⚠️ Some files did not compl
 | OCRP-SKILL-040 | Continue without plan_guidance; mention in the final report. |
 | OCRP-SUB-050/051 | Already surfaced by `ocr-aggregate` as partial. |
 | OCRP-HOOK-060 | Silent; jsonl bus still works. |
+| OCRP-FILTER-070 | Continue without filtering that file; mention the downgrade in the final report. |
+| OCRP-FILTER-071 | `ocr-filter-apply` rejected a path outside the review context; treat as filter soft failure in orchestration. |
+| OCRP-FILTER-072 | `ocr-filter-apply` rejected malformed filter decisions; treat as filter soft failure in orchestration. |

@@ -62,9 +62,10 @@ In brief:
 3. Optional PLAN: `skills/ocr-plan` runs inline in the main session, writes `plan.json`.
 4. For each file, a `ocr-reviewer` subagent (defined in `agents/`) runs in parallel.
    Each subagent uses Read/Glob/Grep + Bash `code_comment` to emit comments.
-5. A PostToolUse hook (`hooks/hooks.json`) mirrors Bash tool calls to
+5. For each file with comments, `skills/ocr-review-filter` can hide false-positive or low-quality comments. `bin/ocr-filter-apply` writes auditable filter results under `.ocr-runs/<runId>/filters/`.
+6. A PostToolUse hook (`hooks/hooks.json`) mirrors Bash tool calls to
    `.ocr-runs/<runId>/events.jsonl` (durable bus) and prints live progress.
-6. `bin/ocr-aggregate` reads `comments.jsonl` + `done/` → `report.md` + `report.json`.
+7. `bin/ocr-aggregate` reads `comments.jsonl` + `filters/` + `done/` → `report.md` + `report.json`.
 
 JSON reports keep OCR-compatible token summary fields, but P0 sets token counters to `0` because this plugin delegates all model calls to the host Claude Code session and does not receive per-call token accounting from a bundled LLM client.
 
@@ -78,6 +79,7 @@ JSON reports keep OCR-compatible token summary fields, but P0 sets token counter
 | LLM client | bundled | **none** (delegates to host) |
 | Per-file concurrency | yes (--concurrency) | yes (subagents) |
 | Report formats | text / json | markdown / json / both |
+| Review comment filtering | yes | yes (host LLM + `ocr-filter-apply`) |
 | Custom rules (.code-review.yaml) | yes | P1 |
 | GitHub/GitLab PR posting | no | P1 |
 
@@ -102,6 +104,9 @@ P1 (planned): `.code-review.yaml` at repo root, falling back to
 | `OCRP-SKILL-040` | PLAN output unparseable | Already downgraded; main review still runs |
 | `OCRP-SUB-050/051` | Some subagents did not finish | Report flagged `partial: true` |
 | `OCRP-HOOK-060` | Hook failed | Silent; final result unaffected |
+| `OCRP-FILTER-070` | Filter stage failed | Review continues without filtering that file |
+| `OCRP-FILTER-071` | Filter path outside review context | Check filter input path |
+| `OCRP-FILTER-072` | Invalid filter decision JSON | Ensure each hide decision has `comment_id`, `action: "hide"`, and `reason` |
 
 ## 8. Development
 
