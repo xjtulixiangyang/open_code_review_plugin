@@ -107,7 +107,7 @@ After all reviewer subagents return (each ends with `done: <path>`), run Bash:
 ocr-aggregate --runId <runId> --format <markdown|json|both>
 ```
 
-The stdout JSON contains `reportMd`, `reportJson`, `partial`, `partialFiles`, `rawCommentCount`, `commentCount`, `filteredCommentCount`, and `filterWarnings`.
+The stdout JSON contains `reportMd`, `reportJson`, `partial`, `partialFiles`, `rawCommentCount`, `commentCount`, `filteredCommentCount`, `filterWarnings`, and `relocationWarnings`.
 
 If no format flag was provided to `ocr-prepare`, use `both`.
 

@@ -107,6 +107,8 @@ if [ ! -f ".ocr-runs/$RUNID/report.json" ]; then
 fi
 
 grep -q "Magic string" ".ocr-runs/$RUNID/report.md" || { echo "[smoke] FAIL: kept comment not in report.md"; exit 1; }
+grep -q "a.ts:1" ".ocr-runs/$RUNID/report.md" || { echo "[smoke] FAIL: relocated comment line not in report.md"; exit 1; }
+grep -q '"start_line": 1' ".ocr-runs/$RUNID/report.json" || { echo "[smoke] FAIL: relocated comment line not in report.json"; exit 1; }
 if grep -q "Duplicate noise" ".ocr-runs/$RUNID/report.md"; then
   echo "[smoke] FAIL: hidden comment present in report.md"
   exit 1

@@ -1,5 +1,5 @@
 import type { CommentRecord } from '../model/comment.js';
-import type { DiffLine, FileChange } from '../model/request.js';
+import type { FileChange } from '../model/request.js';
 import type { RelocationDecision } from '../model/relocation.js';
 
 interface LineEntry {
@@ -46,13 +46,18 @@ function rangeWithinNewSide(lines: LineEntry[], start: number, end: number): boo
   return true;
 }
 
-function normalizeCode(code: string): string[] {
-  return code.split('\n').map((line) => line.trim()).filter((line) => line.length > 0);
+function targetLines(code: string): string[] {
+  const lines = code.split('\n');
+  return lines.at(-1) === '' ? lines.slice(0, -1) : lines;
+}
+
+function trimmedTargetLines(code: string): string[] {
+  return targetLines(code).map((line) => line.trim());
 }
 
 function findLineSequence(lines: LineEntry[], code: string, near: number): { start: number; end: number } | null {
-  const targetExact = code.split('\n').filter((line) => line.length > 0);
-  const targetTrimmed = normalizeCode(code);
+  const targetExact = targetLines(code);
+  const targetTrimmed = trimmedTargetLines(code);
   const candidates: Array<{ start: number; end: number; distance: number }> = [];
 
   for (const target of [targetExact, targetTrimmed]) {
@@ -82,7 +87,9 @@ function findLineSequence(lines: LineEntry[], code: string, near: number): { sta
 }
 
 function fileTextLines(text: string): LineEntry[] {
-  return text.split('\n').map((line, index) => ({ lineNo: index + 1, text: line })).filter((line) => line.text.length > 0);
+  const lines = text.split('\n');
+  const contentLines = lines.at(-1) === '' ? lines.slice(0, -1) : lines;
+  return contentLines.map((line, index) => ({ lineNo: index + 1, text: line }));
 }
 
 function nearestLine(lines: LineEntry[], target: number): number | null {

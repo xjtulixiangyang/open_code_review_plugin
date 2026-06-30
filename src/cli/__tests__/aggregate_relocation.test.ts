@@ -51,6 +51,14 @@ const COMMENT_FALLBACK: CommentRecord = {
   content: 'Fallback original',
 };
 
+const COMMENT_UNCHANGED: CommentRecord = {
+  comment_id: 'c-unchanged',
+  path: 'src/a.ts',
+  start_line: 20,
+  end_line: 20,
+  content: 'Already correct',
+};
+
 test('aggregate applies relocation decisions to visible comments', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'ocrp-aggregate-reloc-'));
   const oldCwd = process.cwd();
@@ -60,6 +68,7 @@ test('aggregate applies relocation decisions to visible comments', async () => {
     await appendComment('reloc-run', COMMENT_KEEP);
     await appendComment('reloc-run', COMMENT_RELOCATE);
     await appendComment('reloc-run', COMMENT_FALLBACK);
+    await appendComment('reloc-run', COMMENT_UNCHANGED);
     await writeRelocationResult('reloc-run', {
       path: 'src/a.ts',
       decisions: [
@@ -81,6 +90,15 @@ test('aggregate applies relocation decisions to visible comments', async () => {
           source: 'fallback_original',
           reason: 'Could not resolve',
         },
+        {
+          comment_id: 'c-unchanged',
+          original_start_line: 20,
+          original_end_line: 20,
+          resolved_start_line: 20,
+          resolved_end_line: 20,
+          source: 'unchanged',
+          reason: 'Already on new side',
+        },
       ],
       _meta: { source: 'line_resolver', ts: 'now' },
     });
@@ -92,13 +110,13 @@ test('aggregate applies relocation decisions to visible comments', async () => {
       commentCount: number;
     };
 
-    assert.equal(summary.rawCommentCount, 3);
-    assert.equal(summary.commentCount, 3);
+    assert.equal(summary.rawCommentCount, 4);
+    assert.equal(summary.commentCount, 4);
 
     // Check JSON report
     const reportJson = JSON.parse(await readFile(join(dir, '.ocr-runs/reloc-run/report.json'), 'utf8'));
-    assert.equal(reportJson.summary.comments, 3);
-    assert.equal(reportJson.summary.raw_comments, 3);
+    assert.equal(reportJson.summary.comments, 4);
+    assert.equal(reportJson.summary.raw_comments, 4);
     // Relocated comment should have updated line numbers
     const relocComment = reportJson.comments.find((c: any) => c.comment_id === 'c-reloc');
     assert.equal(relocComment.start_line, 14);
@@ -111,7 +129,11 @@ test('aggregate applies relocation decisions to visible comments', async () => {
     const keepComment = reportJson.comments.find((c: any) => c.comment_id === 'c-keep');
     assert.equal(keepComment.start_line, 1);
     assert.equal(keepComment.end_line, 1);
-    // Summary should have relocation counts
+    // Unchanged relocation decisions should not increment relocated/fallback counts
+    const unchangedComment = reportJson.comments.find((c: any) => c.comment_id === 'c-unchanged');
+    assert.equal(unchangedComment.start_line, 20);
+    assert.equal(unchangedComment.end_line, 20);
+
     assert.equal(reportJson.summary.relocated_comments, 1);
     assert.equal(reportJson.summary.relocation_fallbacks, 1);
 

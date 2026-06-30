@@ -79,6 +79,32 @@ test('clamps an invalid line to the nearest new-side hunk line', () => {
   assert.equal(result.resolved_end_line, 23);
 });
 
+
+test('matches existing_code with blank lines against diff new-side lines', () => {
+  const file: FileChange = {
+    ...FILE,
+    hunks: [{
+      ...FILE.hunks[0],
+      lines: [
+        { kind: '+', oldLineNo: 0, newLineNo: 30, text: 'if (ready) {' },
+        { kind: '+', oldLineNo: 0, newLineNo: 31, text: '' },
+        { kind: '+', oldLineNo: 0, newLineNo: 32, text: '  run();' },
+        { kind: '+', oldLineNo: 0, newLineNo: 33, text: '}' },
+      ],
+    }],
+  };
+
+  const result = resolveCommentLocation(file, comment({
+    start_line: 99,
+    end_line: 99,
+    existing_code: 'if (ready) {\n\n  run();\n}',
+  }));
+
+  assert.equal(result.source, 'existing_code_diff');
+  assert.equal(result.resolved_start_line, 30);
+  assert.equal(result.resolved_end_line, 33);
+});
+
 test('falls back to original line when no new-side lines exist', () => {
   const deletedFile: FileChange = { ...FILE, hunks: [{ ...FILE.hunks[0], lines: [{ kind: '-', oldLineNo: 1, newLineNo: 0, text: 'gone' }] }] };
   const result = resolveCommentLocation(deletedFile, comment({ start_line: 7, end_line: 8 }));
