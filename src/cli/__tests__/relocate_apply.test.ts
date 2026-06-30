@@ -65,8 +65,9 @@ test('relocate_apply writes relocation decisions for visible comments', async ()
   const dir = await setupRun();
   try {
     const { stdout } = await runCli(dir, ['--runId', 'run1', '--path', 'src/a.ts']);
-    const out = JSON.parse(stdout) as { relocatedCount: number; fallbackCount: number; relocationPath: string };
+    const out = JSON.parse(stdout) as { relocatedCount: number; unchangedCount: number; fallbackCount: number; relocationPath: string };
     assert.equal(out.relocatedCount, 1);
+    assert.equal(out.unchangedCount, 0);
     assert.equal(out.fallbackCount, 0);
     assert.equal(out.relocationPath, '.ocr-runs/run1/relocations/src%2Fa.ts.json');
 

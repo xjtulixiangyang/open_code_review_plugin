@@ -64,8 +64,9 @@ async function main(): Promise<void> {
   const repoRoot = ctx.repoRoot || process.cwd();
   const newFileText = await readOptionalFile(join(repoRoot, f.path));
   const decisions = visibleComments.map((comment) => resolveCommentLocation(file, comment, newFileText));
-  const relocatedCount = decisions.filter((decision) => decision.source !== 'fallback_original').length;
-  const fallbackCount = decisions.length - relocatedCount;
+  const unchangedCount = decisions.filter((decision) => decision.source === 'unchanged').length;
+  const fallbackCount = decisions.filter((decision) => decision.source === 'fallback_original').length;
+  const relocatedCount = decisions.length - unchangedCount - fallbackCount;
 
   const result: RelocationFileResult = {
     path: f.path,
@@ -83,6 +84,7 @@ async function main(): Promise<void> {
       runId: f.runId,
       path: f.path,
       relocatedCount,
+      unchangedCount,
       fallbackCount,
       relocationPath: `.ocr-runs/${f.runId}/relocations/${safePathKey(f.path)}.json`,
     }, null, 2) + '\n',
