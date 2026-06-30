@@ -45,10 +45,7 @@ export function renderMarkdownReport(
   const relocCount = opts.relocatedCount ?? 0;
   const fbCount = opts.relocationFallbackCount ?? 0;
   if (relocCount > 0 || fbCount > 0) {
-    const parts: string[] = [];
-    if (relocCount > 0) parts.push(`${relocCount}`);
-    if (fbCount > 0) parts.push(`fallback ${fbCount}`);
-    lines.push(`**Relocated**: ${parts.join(', ')}  `);
+    lines.push(`**Relocated**: ${relocCount} (fallback ${fbCount})  `);
   }
   lines.push('');
 

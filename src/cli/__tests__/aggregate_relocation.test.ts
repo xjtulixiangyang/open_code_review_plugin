@@ -117,8 +117,7 @@ test('aggregate applies relocation decisions to visible comments', async () => {
 
     // Check Markdown report
     const reportMd = await readFile(join(dir, '.ocr-runs/reloc-run/report.md'), 'utf8');
-    assert.match(reportMd, /Relocated/);
-    assert.match(reportMd, /fallback/);
+    assert.match(reportMd, /\*\*Relocated\*\*: 1 \(fallback 1\)/);
   } finally {
     process.chdir(oldCwd);
     await rm(dir, { recursive: true, force: true });
