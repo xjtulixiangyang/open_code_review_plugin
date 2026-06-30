@@ -84,6 +84,21 @@ After each file's reviewer subagent returns, run the filter stage for that file:
    ```
 6. If the skill output is unparseable or `ocr-filter-apply` exits non-zero, treat it as a soft failure: continue without filtering this file and mention `OCRP-FILTER-070` in the final report.
 
+### Step 3.6 — Line relocation (RE_LOCATION_TASK)
+
+After each file's filter stage completes, run the line relocation stage for that file:
+
+1. If the file has zero visible comments, skip relocation for this file.
+2. Otherwise run:
+   ```bash
+   ocr-relocate-apply --runId <runId> --path <currentFilePath>
+   ```
+3. The command reads `context.json` for the file's diff, reads `comments.jsonl` and `filters/`, and writes relocation decisions to `.ocr-runs/<runId>/relocations/<safePathKey>.json`.
+4. If `ocr-relocate-apply` exits non-zero, treat it as a soft failure: continue without relocating this file and mention `OCRP-RELOCATE-080` in the final report.
+5. If deterministic relocation reports fallback comments, optionally invoke the `ocr-relocate` skill for those comments and apply the returned decisions.
+
+Relocation is deterministic and does not require an LLM call. Failures are soft; aggregate will use original line ranges.
+
 ### Step 4 — Aggregate
 
 After all reviewer subagents return (each ends with `done: <path>`), run Bash:
@@ -121,3 +136,6 @@ If `partial == true`, prefix your message with: `⚠️ Some files did not compl
 | OCRP-FILTER-070 | Continue without filtering that file; mention the downgrade in the final report. |
 | OCRP-FILTER-071 | `ocr-filter-apply` rejected a path outside the review context; treat as filter soft failure in orchestration. |
 | OCRP-FILTER-072 | `ocr-filter-apply` rejected malformed filter decisions; treat as filter soft failure in orchestration. |
+| OCRP-RELOCATE-080 | `ocr-relocate-apply` failed for a file; aggregate uses original line ranges. |
+| OCRP-RELOCATE-081 | Relocation input references path outside review context. |
+| OCRP-RELOCATE-082 | Relocation decision malformed. |

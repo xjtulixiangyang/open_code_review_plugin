@@ -63,9 +63,10 @@ In brief:
 4. For each file, a `ocr-reviewer` subagent (defined in `agents/`) runs in parallel.
    Each subagent uses Read/Glob/Grep + Bash `code_comment` to emit comments.
 5. For each file with comments, `skills/ocr-review-filter` can hide false-positive or low-quality comments. `bin/ocr-filter-apply` writes auditable filter results under `.ocr-runs/<runId>/filters/`.
-6. A PostToolUse hook (`hooks/hooks.json`) mirrors Bash tool calls to
+6. For each file with visible comments, `bin/ocr-relocate-apply` normalizes comment line numbers by locating `existing_code` snippets in the diff. Relocation decisions are written under `.ocr-runs/<runId>/relocations/`. This step is deterministic and does not require an LLM call.
+7. A PostToolUse hook (`hooks/hooks.json`) mirrors Bash tool calls to
    `.ocr-runs/<runId>/events.jsonl` (durable bus) and prints live progress.
-7. `bin/ocr-aggregate` reads `comments.jsonl` + `filters/` + `done/` → `report.md` + `report.json`.
+8. `bin/ocr-aggregate` reads `comments.jsonl` + `filters/` + `relocations/` + `done/` → `report.md` + `report.json`.
 
 JSON reports keep OCR-compatible token summary fields, but P0 sets token counters to `0` because this plugin delegates all model calls to the host Claude Code session and does not receive per-call token accounting from a bundled LLM client.
 
@@ -107,6 +108,9 @@ P1 (planned): `.code-review.yaml` at repo root, falling back to
 | `OCRP-FILTER-070` | Filter stage failed | Review continues without filtering that file |
 | `OCRP-FILTER-071` | Filter path outside review context | Check filter input path |
 | `OCRP-FILTER-072` | Invalid filter decision JSON | Ensure each hide decision has `comment_id`, `action: "hide"`, and `reason` |
+| `OCRP-RELOCATE-080` | Relocation failed for a file | Review continues with original line ranges |
+| `OCRP-RELOCATE-081` | Relocation path outside context | Check relocation input path |
+| `OCRP-RELOCATE-082` | Malformed relocation decision | Check relocation audit format |
 
 ## 8. Development
 
@@ -121,7 +125,7 @@ Directory contract (see spec §2):
 
 - `commands/review.md` — orchestration only
 - `agents/ocr-reviewer.md` — subagent definition, locked tool list
-- `skills/ocr-plan/SKILL.md`, `skills/ocr-review-file/SKILL.md` — prompts only
+- `skills/ocr-plan/SKILL.md`, `skills/ocr-review-file/SKILL.md`, `skills/ocr-relocate/SKILL.md` — prompts only
 - `hooks/hooks.json` — declarative hook bindings
 - `bin/*` — executables, populated by `npm run build`
 - `assets/rule_docs/*.md` — review checklists (copied from OCR; do not edit)

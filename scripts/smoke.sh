@@ -45,6 +45,41 @@ if [ ! -f ".ocr-runs/$RUNID/context.json" ]; then
   exit 1
 fi
 
+# --- Test 2: line relocation via ocr-relocate-apply ---
+echo ""
+echo "=== Test 2: line relocation ==="
+
+# Create a comment with existing_code but wrong line number (99 instead of 1)
+COMMENT_RELOCATE="$($PLUGIN_ROOT/bin/code_comment --runId "$RUNID" --path a.ts --start 99 --end 99 --content "Use const" --existing-code "export function hello() {" --subagent reviewer-b)"
+RELOCATE_ID="$(echo "$COMMENT_RELOCATE" | grep -o '"comment_id":"[^"]*"' | head -1 | cut -d'"' -f4)"
+if [ -z "$RELOCATE_ID" ]; then
+  echo "FAIL: no comment_id in code_comment output"
+  exit 1
+fi
+echo "Created comment $RELOCATE_ID with wrong line 99"
+
+# Run ocr-relocate-apply
+RELOCATE_OUTPUT=$("$PLUGIN_ROOT/bin/ocr-relocate-apply" --runId "$RUNID" --path a.ts 2>&1)
+echo "ocr-relocate-apply output: $RELOCATE_OUTPUT"
+
+# Check that relocation was written
+RELOCATION_FILE=".ocr-runs/$RUNID/relocations/a.ts.json"
+if [ ! -f "$RELOCATION_FILE" ]; then
+  echo "FAIL: relocation file not found at $RELOCATION_FILE"
+  ls -la ".ocr-runs/$RUNID/relocations/" 2>/dev/null || echo "no relocations dir"
+  exit 1
+fi
+echo "PASS: relocation file created"
+
+# Check that the line was relocated from 99 to 1
+RELOCATED_LINE=$(cat "$RELOCATION_FILE" | grep -o '"resolved_start_line": [0-9]*' | head -1 | grep -o '[0-9]*')
+if [ "$RELOCATED_LINE" != "1" ]; then
+  echo "FAIL: Expected resolved line 1, got $RELOCATED_LINE"
+  cat "$RELOCATION_FILE"
+  exit 1
+fi
+echo "PASS: ocr-relocate-apply relocated line from 99 to 1"
+
 # 模拟 reviewer subagent 行为
 COMMENT_KEEP="$($PLUGIN_ROOT/bin/code_comment --runId "$RUNID" --path a.ts --start 2 --end 2 --content "Magic string" --subagent reviewer-a)"
 COMMENT_HIDE="$($PLUGIN_ROOT/bin/code_comment --runId "$RUNID" --path a.ts --start 2 --end 2 --content "Duplicate noise" --subagent reviewer-a)"
@@ -56,6 +91,7 @@ fi
 FILTER_INPUT="{\"path\":\"a.ts\",\"decisions\":[{\"comment_id\":\"$HIDE_ID\",\"action\":\"hide\",\"reason\":\"duplicate smoke comment\"}]}"
 "$PLUGIN_ROOT/bin/ocr-filter-apply" --runId "$RUNID" --path a.ts --input "$FILTER_INPUT" --subagent filter-a >/dev/null
 "$PLUGIN_ROOT/bin/task_done" --runId "$RUNID" --subagent reviewer-a --file a.ts >/dev/null
+"$PLUGIN_ROOT/bin/task_done" --runId "$RUNID" --subagent reviewer-b --file a.ts >/dev/null
 
 # 跑 aggregate
 AGG="$($PLUGIN_ROOT/bin/ocr-aggregate --runId "$RUNID")"
