@@ -47,6 +47,7 @@ async function main() {
       rules_check: 'ocr-rules-check',
       plan_guidance: 'ocr-plan-guidance',
       filter_apply: 'ocr-filter-apply',
+      relocate_apply: 'ocr-relocate-apply',
     };
     const binName = map[stem] ?? stem;
     const target = join(binDir, binName);
