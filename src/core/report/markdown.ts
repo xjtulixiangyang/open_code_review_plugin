@@ -3,6 +3,8 @@ import type { CommentRecord } from '../model/comment.js';
 
 export interface RenderOpts {
   partialFiles: string[];
+  rawCommentCount?: number;
+  filteredCommentCount?: number;
 }
 
 /**
@@ -35,6 +37,9 @@ export function renderMarkdownReport(
   lines.push(`**Range**: \`${ctx.range}\`  `);
   lines.push(`**Files reviewed**: ${ctx.files.length}  `);
   lines.push(`**Issues found**: ${comments.length}`);
+  if ((opts.filteredCommentCount ?? 0) > 0) {
+    lines.push(`**Filtered**: ${opts.filteredCommentCount} (hidden from raw ${opts.rawCommentCount ?? comments.length})  `);
+  }
   lines.push('');
 
   if (comments.length === 0) {

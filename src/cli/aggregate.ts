@@ -2,6 +2,7 @@
 import {
   readContext,
   readComments,
+  readFilterResults,
   listDone,
   writeReport,
 } from '../core/runs/store.js';
@@ -34,7 +35,32 @@ async function main(): Promise<void> {
   const format = f.format ?? 'both';
 
   const ctx = await readContext<ReviewContext>(f.runId);
-  const comments = await readComments<CommentRecord>(f.runId);
+  const rawComments = await readComments<CommentRecord>(f.runId);
+  const filters = await readFilterResults(f.runId);
+  const contextPaths = new Set(ctx.files.map((file) => file.path));
+  const commentById = new Map(rawComments.map((comment) => [comment.comment_id, comment]));
+  const hiddenIds = new Set<string>();
+  const filterWarnings = [...filters.warnings];
+  for (const result of filters.results) {
+    if (!contextPaths.has(result.path)) {
+      filterWarnings.push({ kind: 'filter_path_out_of_scope', path: result.path, detail: 'filter result path is not in review context' });
+      continue;
+    }
+    for (const decision of result.decisions) {
+      const comment = commentById.get(decision.comment_id);
+      if (!comment) {
+        filterWarnings.push({ kind: 'filter_comment_missing', path: result.path, detail: `comment_id not found: ${decision.comment_id}` });
+        continue;
+      }
+      if (comment.path !== result.path) {
+        filterWarnings.push({ kind: 'filter_comment_path_mismatch', path: result.path, detail: `comment_id belongs to ${comment.path}: ${decision.comment_id}` });
+        continue;
+      }
+      hiddenIds.add(decision.comment_id);
+    }
+  }
+  const comments = rawComments.filter((comment) => !hiddenIds.has(comment.comment_id));
+  const filteredCommentCount = rawComments.length - comments.length;
   const dones = await listDone(f.runId);
   const doneFiles = new Set(dones.map((d) => d.file));
   const expected = new Set(ctx.files.map((x) => x.path));
@@ -44,11 +70,11 @@ async function main(): Promise<void> {
   const dur = Date.now() - start;
 
   if (format === 'markdown' || format === 'both') {
-    const md = renderMarkdownReport(ctx, comments, { partialFiles });
+    const md = renderMarkdownReport(ctx, comments, { partialFiles, rawCommentCount: rawComments.length, filteredCommentCount });
     await writeReport(f.runId, 'report.md', md);
   }
   if (format === 'json' || format === 'both') {
-    const j = renderJsonReport(ctx, comments, { partialFiles, durationMs: dur });
+    const j = renderJsonReport(ctx, comments, { partialFiles, durationMs: dur, rawCommentCount: rawComments.length, filteredCommentCount, filterWarnings });
     await writeReport(f.runId, 'report.json', j);
   }
   process.stdout.write(
@@ -58,7 +84,10 @@ async function main(): Promise<void> {
       reportJson: `.ocr-runs/${f.runId}/report.json`,
       partial: partialFiles.length > 0,
       filesReviewed: ctx.files.length,
+      rawCommentCount: rawComments.length,
       commentCount: comments.length,
+      filteredCommentCount,
+      filterWarnings,
       partialFiles,
     }, null, 2) + '\n',
   );
