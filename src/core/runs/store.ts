@@ -1,6 +1,7 @@
 import { mkdir, writeFile, readFile, readdir, open } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import type { FilterFileResult, ReadFilterResultsOutput } from '../model/filter.js';
+import type { RelocationFileResult, ReadRelocationResultsOutput } from '../model/relocation.js';
 
 const ALPHABET = 'abcdefghijklmnopqrstuvwxyz0123456789';
 
@@ -178,6 +179,40 @@ export async function readFilterResults(runId: string): Promise<ReadFilterResult
     } catch (err) {
       out.warnings.push({
         kind: 'filter_parse_error',
+        path: n,
+        detail: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+  return out;
+}
+
+export async function writeRelocationResult(runId: string, result: RelocationFileResult): Promise<void> {
+  const dir = join(runDir(runId), 'relocations');
+  await ensureDir(dir);
+  await writeFile(join(dir, `${safePathKey(result.path)}.json`), JSON.stringify(result, null, 2), 'utf8');
+}
+
+export async function readRelocationResults(runId: string): Promise<ReadRelocationResultsOutput> {
+  const dir = join(runDir(runId), 'relocations');
+  let names: string[];
+  try {
+    names = await readdir(dir);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return { results: [], warnings: [] };
+    throw err;
+  }
+
+  const out: ReadRelocationResultsOutput = { results: [], warnings: [] };
+  for (const n of names) {
+    if (!n.endsWith('.json')) continue;
+    const file = join(dir, n);
+    try {
+      const body = await readFile(file, 'utf8');
+      out.results.push(JSON.parse(body) as RelocationFileResult);
+    } catch (err) {
+      out.warnings.push({
+        kind: 'relocation_parse_error',
         path: n,
         detail: err instanceof Error ? err.message : String(err),
       });
