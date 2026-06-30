@@ -1,5 +1,6 @@
 import { mkdir, writeFile, readFile, readdir, open } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
+import type { FilterFileResult, ReadFilterResultsOutput } from '../model/filter.js';
 
 const ALPHABET = 'abcdefghijklmnopqrstuvwxyz0123456789';
 
@@ -145,4 +146,42 @@ export async function writeReport(
   const dir = runDir(runId);
   await ensureDir(dir);
   await writeFile(join(dir, name), body, 'utf8');
+}
+
+export function safePathKey(path: string): string {
+  return encodeURIComponent(path);
+}
+
+export async function writeFilterResult(runId: string, result: FilterFileResult): Promise<void> {
+  const dir = join(runDir(runId), 'filters');
+  await ensureDir(dir);
+  await writeFile(join(dir, `${safePathKey(result.path)}.json`), JSON.stringify(result, null, 2), 'utf8');
+}
+
+export async function readFilterResults(runId: string): Promise<ReadFilterResultsOutput> {
+  const dir = join(runDir(runId), 'filters');
+  let names: string[];
+  try {
+    names = await readdir(dir);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return { results: [], warnings: [] };
+    throw err;
+  }
+
+  const out: ReadFilterResultsOutput = { results: [], warnings: [] };
+  for (const n of names) {
+    if (!n.endsWith('.json')) continue;
+    const file = join(dir, n);
+    try {
+      const body = await readFile(file, 'utf8');
+      out.results.push(JSON.parse(body) as FilterFileResult);
+    } catch (err) {
+      out.warnings.push({
+        kind: 'filter_parse_error',
+        path: n,
+        detail: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+  return out;
 }
