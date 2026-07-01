@@ -16,5 +16,5 @@ async function main(): Promise<void> {
 
 main().catch((err) => {
   process.stderr.write(`[code_comment] ${err?.message ?? err}\n`);
-  process.exit(1);
+  process.exit(2);
 });
