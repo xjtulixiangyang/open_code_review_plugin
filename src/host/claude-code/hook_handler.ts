@@ -56,11 +56,34 @@ export function extractToolCall(cmd: string): ToolCallExtraction | null {
   const head = parts[0];
   if (!TARGET_TOOLS.includes(head as typeof TARGET_TOOLS[number])) return null;
   const args: Record<string, string> = {};
+  let parsedArgs: Record<string, unknown> | null = null;
   for (let i = 1; i < parts.length; i++) {
     const a = parts[i];
     if (a.startsWith('--')) {
-      args[a.slice(2)] = parts[i + 1] ?? '';
+      const key = a.slice(2);
+      const val = parts[i + 1] ?? '';
       i++;
+      if (key === 'args') {
+        try {
+          const p = JSON.parse(val);
+          if (typeof p === 'object' && p !== null && !Array.isArray(p)) parsedArgs = p as Record<string, unknown>;
+        } catch { /* ignore malformed args in hook best-effort path */ }
+      } else {
+        args[key] = val;
+      }
+    }
+  }
+  if (parsedArgs) {
+    for (const [k, v] of Object.entries(parsedArgs)) {
+      if (typeof v === 'string') args[k] = v;
+      else if (typeof v === 'number') args[k] = String(v);
+    }
+    // best-effort first-comment line range for progress display
+    const comments = parsedArgs['comments'];
+    if (Array.isArray(comments) && comments.length > 0 && typeof comments[0] === 'object' && comments[0] !== null) {
+      const first = comments[0] as Record<string, unknown>;
+      if (typeof first['start_line'] === 'number') args['start'] = String(first['start_line']);
+      if (typeof first['end_line'] === 'number') args['end'] = String(first['end_line']);
     }
   }
   return { tool: head as ToolCallExtraction['tool'], args };
