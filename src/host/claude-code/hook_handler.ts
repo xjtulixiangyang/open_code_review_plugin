@@ -85,6 +85,11 @@ export function extractToolCall(cmd: string): ToolCallExtraction | null {
       if (typeof first['start_line'] === 'number') args['start'] = String(first['start_line']);
       if (typeof first['end_line'] === 'number') args['end'] = String(first['end_line']);
     }
+    // flatten path_array[0] -> path for file_read_diff progress display
+    const pathArray = parsedArgs['path_array'];
+    if (Array.isArray(pathArray) && pathArray.length > 0 && typeof pathArray[0] === 'string') {
+      args['path'] = pathArray[0];
+    }
   }
   return { tool: head as ToolCallExtraction['tool'], args };
 }

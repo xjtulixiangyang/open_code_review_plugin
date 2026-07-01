@@ -52,3 +52,11 @@ test('formatProgressLine task_done', () => {
   const line = formatProgressLine({ tool: 'task_done', args: { subagent: 'reviewer-a', file: 'src/a.ts' } as any });
   assert.match(line, /✅|reviewer-a/);
 });
+
+test('formatProgressLine file_read_diff shows path from path_array', () => {
+  const t = extractToolCall('file_read_diff --runId R --args \'{"path_array":["src/a.ts"]}\'');
+  assert.equal(t?.tool, 'file_read_diff');
+  assert.equal(t?.args.path, 'src/a.ts');
+  const line = formatProgressLine(t!);
+  assert.match(line, /src\/a\.ts/);
+});
