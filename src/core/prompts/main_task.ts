@@ -28,9 +28,9 @@ Please keep your responses concise and objective.
 - To read a file: use the **Read** tool.
 - To find files by pattern: use the **Glob** tool.
 - To search code text: use the **Grep** tool.
-- To read another changed file's diff: run \`Bash\` with \`file_read_diff --runId <runId> --path <path>\`.
-- To submit a confirmed review comment: run \`Bash\` with \`code_comment --runId <runId> --path <p> --start <n> --end <m> --content <text> [--suggestion-code <code>] [--existing-code <code>] [--thinking <text>]\`.
-- When your review is complete, run \`Bash\` with \`task_done --runId <runId> --subagent <id> --file <path>\` to signal completion.
+- To read another changed file's diff: run \`Bash\` with \`file_read_diff --runId <runId> --args '{"path_array":["<path>"]}'\`.
+- To submit a confirmed review comment: run \`Bash\` with \`code_comment --runId <runId> --args '{"path":"<p>","subagent":"<id>","comments":[{"start_line":<n>,"end_line":<m>,"content":"<text>"}]}'\`.
+- When your review is complete, run \`Bash\` with \`task_done --runId <runId> --args '{"subagent":"<id>","file":"<path>"}'\` to signal completion.
 
 ## Reply limit
 - If the current code review task is complete, run the \`task_done\` Bash command to end the task.

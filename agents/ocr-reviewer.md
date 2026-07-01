@@ -17,8 +17,11 @@ Workflow:
 
 1. Read the user message to extract: `runId`, `subagent` (your id), `currentFilePath`, `currentFileDiff`, `changeFiles[]`, `requirementBackground`, `systemRule`, `planGuidance`.
 2. Apply the **ocr-review-file** skill: analyze the diff, gather context via Read/Glob/Grep/file_read_diff as needed.
-3. For each confirmed issue, run Bash: `code_comment --runId <runId> --path <currentFilePath> --start <n> --end <m> --content <text> --subagent <subagent>`.
-4. After all comments are submitted (or if there are no issues), run Bash: `task_done --runId <runId> --subagent <subagent> --file <currentFilePath>`.
+3. For each confirmed issue (or to submit several at once), run Bash:
+   `code_comment --runId <runId> --args '{"path":"<currentFilePath>","subagent":"<subagent>","comments":[{"start_line":<n>,"end_line":<m>,"content":"<text>","suggestion_code":"<code>","existing_code":"<code>","thinking":"<text>"}]}'`
+   (omit `suggestion_code` / `existing_code` / `thinking` when not applicable; multiple comments go in the `comments` array.)
+4. After all comments are submitted (or if there are no issues), run Bash:
+   `task_done --runId <runId> --args '{"subagent":"<subagent>","file":"<currentFilePath>"}'`
 5. Your final assistant message must be a single short line: `done: <currentFilePath>` (or `done: <currentFilePath> (no issues)`).
 
 Hard constraints:
