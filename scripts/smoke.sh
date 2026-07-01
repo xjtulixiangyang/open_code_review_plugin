@@ -50,8 +50,8 @@ echo ""
 echo "=== Test 2: line relocation ==="
 
 # Create a comment with existing_code but wrong line number (99 instead of 1)
-COMMENT_RELOCATE="$($PLUGIN_ROOT/bin/code_comment --runId "$RUNID" --path a.ts --start 99 --end 99 --content "Use const" --existing-code "export function hello() {" --subagent reviewer-b)"
-RELOCATE_ID="$(echo "$COMMENT_RELOCATE" | grep -o '"comment_id":"[^"]*"' | head -1 | cut -d'"' -f4)"
+COMMENT_RELOCATE="$($PLUGIN_ROOT/bin/code_comment --runId "$RUNID" --args '{"path":"a.ts","subagent":"reviewer-b","comments":[{"start_line":99,"end_line":99,"content":"Use const","existing_code":"export function hello() {"}]}')"
+RELOCATE_ID="$(echo "$COMMENT_RELOCATE" | grep -o '"comment_ids":\["[^"]*"\]' | head -1 | grep -o 'c-[0-9a-f-]*' | head -1)"
 if [ -z "$RELOCATE_ID" ]; then
   echo "FAIL: no comment_id in code_comment output"
   exit 1
@@ -81,17 +81,17 @@ fi
 echo "PASS: ocr-relocate-apply relocated line from 99 to 1"
 
 # 模拟 reviewer subagent 行为
-COMMENT_KEEP="$($PLUGIN_ROOT/bin/code_comment --runId "$RUNID" --path a.ts --start 2 --end 2 --content "Magic string" --subagent reviewer-a)"
-COMMENT_HIDE="$($PLUGIN_ROOT/bin/code_comment --runId "$RUNID" --path a.ts --start 2 --end 2 --content "Duplicate noise" --subagent reviewer-a)"
-HIDE_ID="$(echo "$COMMENT_HIDE" | grep -o '"comment_id":"[^"]*"' | head -1 | cut -d'"' -f4)"
+COMMENT_KEEP="$($PLUGIN_ROOT/bin/code_comment --runId "$RUNID" --args '{"path":"a.ts","subagent":"reviewer-a","comments":[{"start_line":2,"end_line":2,"content":"Magic string"}]}')"
+COMMENT_HIDE="$($PLUGIN_ROOT/bin/code_comment --runId "$RUNID" --args '{"path":"a.ts","subagent":"reviewer-a","comments":[{"start_line":2,"end_line":2,"content":"Duplicate noise"}]}')"
+HIDE_ID="$(echo "$COMMENT_HIDE" | grep -o '"comment_ids":\["[^"]*"\]' | head -1 | grep -o 'c-[0-9a-f-]*' | head -1)"
 if [ -z "$HIDE_ID" ]; then
   echo "[smoke] FAIL: no comment_id in code_comment output"
   exit 1
 fi
 FILTER_INPUT="{\"path\":\"a.ts\",\"decisions\":[{\"comment_id\":\"$HIDE_ID\",\"action\":\"hide\",\"reason\":\"duplicate smoke comment\"}]}"
 "$PLUGIN_ROOT/bin/ocr-filter-apply" --runId "$RUNID" --path a.ts --input "$FILTER_INPUT" --subagent filter-a >/dev/null
-"$PLUGIN_ROOT/bin/task_done" --runId "$RUNID" --subagent reviewer-a --file a.ts >/dev/null
-"$PLUGIN_ROOT/bin/task_done" --runId "$RUNID" --subagent reviewer-b --file a.ts >/dev/null
+"$PLUGIN_ROOT/bin/task_done" --runId "$RUNID" --args '{"subagent":"reviewer-a","file":"a.ts"}' >/dev/null
+"$PLUGIN_ROOT/bin/task_done" --runId "$RUNID" --args '{"subagent":"reviewer-b","file":"a.ts"}' >/dev/null
 
 # 跑 aggregate
 AGG="$($PLUGIN_ROOT/bin/ocr-aggregate --runId "$RUNID")"

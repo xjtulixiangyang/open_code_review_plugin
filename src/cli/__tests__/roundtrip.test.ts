@@ -55,16 +55,22 @@ test('CLI tools write comments, done markers, file diffs, and aggregate reports'
 
     await runCli(dir, 'code_comment.ts', [
       '--runId', 'run1',
-      '--path', 'src/a.ts',
-      '--start', '1',
-      '--end', '1',
-      '--content', 'Use a clearer value',
-      '--subagent', 'reviewer-0',
+      '--args', JSON.stringify({
+        path: 'src/a.ts',
+        subagent: 'reviewer-0',
+        comments: [{ start_line: 1, end_line: 1, content: 'Use a clearer value' }],
+      }),
     ]);
-    await runCli(dir, 'task_done.ts', ['--runId', 'run1', '--subagent', 'reviewer-0', '--file', 'src/a.ts']);
+    await runCli(dir, 'task_done.ts', [
+      '--runId', 'run1',
+      '--args', JSON.stringify({ subagent: 'reviewer-0', file: 'src/a.ts' }),
+    ]);
 
-    const diff = await runCli(dir, 'file_read_diff.ts', ['--runId', 'run1', '--path', 'src/b.ts']);
-    assert.match(diff.stdout, /src\/b\.ts/);
+    const diff = await runCli(dir, 'file_read_diff.ts', [
+      '--runId', 'run1',
+      '--args', JSON.stringify({ path_array: ['src/b.ts'] }),
+    ]);
+    assert.match(diff.stdout, /==== FILE: src\/b\.ts ====/);
 
     const aggregate = await runCli(dir, 'aggregate.ts', ['--runId', 'run1', '--format', 'both']);
     const summary = JSON.parse(aggregate.stdout) as { partial: boolean; partialFiles: string[]; commentCount: number };

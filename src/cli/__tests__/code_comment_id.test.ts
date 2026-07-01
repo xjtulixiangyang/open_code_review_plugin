@@ -19,33 +19,32 @@ test('code_comment generates stable comment_id in stdout and jsonl', async () =>
   try {
     const first = await runCodeComment(dir, [
       '--runId', 'run1',
-      '--path', 'src/a.ts',
-      '--start', '1',
-      '--end', '1',
-      '--content', 'first',
-      '--subagent', 'reviewer-a',
+      '--args', JSON.stringify({
+        path: 'src/a.ts', subagent: 'reviewer-a',
+        comments: [{ start_line: 1, end_line: 1, content: 'first' }],
+      }),
     ]);
     const second = await runCodeComment(dir, [
       '--runId', 'run1',
-      '--path', 'src/a.ts',
-      '--start', '2',
-      '--end', '2',
-      '--content', 'second',
-      '--subagent', 'reviewer-a',
+      '--args', JSON.stringify({
+        path: 'src/a.ts', subagent: 'reviewer-a',
+        comments: [{ start_line: 2, end_line: 2, content: 'second' }],
+      }),
     ]);
 
-    const firstOut = JSON.parse(first.stdout) as { comment_id: string };
-    const secondOut = JSON.parse(second.stdout) as { comment_id: string };
+    const firstOut = JSON.parse(first.stdout) as { comment_ids: string[] };
+    const secondOut = JSON.parse(second.stdout) as { comment_ids: string[] };
 
-    assert.match(firstOut.comment_id, /^c-[0-9a-f-]{36}$/);
-    assert.match(secondOut.comment_id, /^c-[0-9a-f-]{36}$/);
-    assert.notEqual(firstOut.comment_id, secondOut.comment_id);
+    assert.equal(firstOut.comment_ids.length, 1);
+    assert.match(firstOut.comment_ids[0], /^c-[0-9a-f-]{36}$/);
+    assert.match(secondOut.comment_ids[0], /^c-[0-9a-f-]{36}$/);
+    assert.notEqual(firstOut.comment_ids[0], secondOut.comment_ids[0]);
 
     const body = await readFile(join(dir, '.ocr-runs/run1/comments.jsonl'), 'utf8');
     const lines = body.trim().split('\n').map((line) => JSON.parse(line) as { comment_id: string; content: string });
     assert.equal(lines.length, 2);
-    assert.equal(lines[0].comment_id, firstOut.comment_id);
-    assert.equal(lines[1].comment_id, secondOut.comment_id);
+    assert.equal(lines[0].comment_id, firstOut.comment_ids[0]);
+    assert.equal(lines[1].comment_id, secondOut.comment_ids[0]);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
