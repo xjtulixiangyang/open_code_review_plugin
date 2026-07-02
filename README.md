@@ -49,7 +49,7 @@ Inside Claude Code:
 | `--concurrency <n>` | same | 8 | Instructs command orchestration to dispatch at most N reviewers |
 | `--format markdown|json|both` | `--format` | both | Controls aggregate artifacts |
 
-P1 planned flags are parsed defensively but rejected in P0 with `OCRP-RUN-011`: `--rules`, `--preview` / `-p`, and `--dry-run`. This prevents silent false support until custom rules and preview mode are implemented.
+`--rules <path>` (alias `--rule`), `--preview` / `-p`, and `--dry-run` are supported. See §6 (Custom rules) and §7 (Preview and dry-run).
 
 ## 4. Architecture
 
@@ -81,7 +81,7 @@ JSON reports keep OCR-compatible token summary fields, but P0 sets token counter
 | Per-file concurrency | yes (--concurrency) | yes (subagents) |
 | Report formats | text / json | markdown / json / both |
 | Review comment filtering | yes | yes (host LLM + `ocr-filter-apply`) |
-| Custom rules (.code-review.yaml) | yes | P1 |
+| Custom rules (.code-review.yaml) | yes | yes |
 | GitHub/GitLab PR posting | no | P1 |
 
 If you want a standalone CLI with your own API key → use OCR. If you want to
@@ -89,12 +89,49 @@ review inside an existing Claude Code session → use this plugin.
 
 ## 6. Configuration
 
-P0: only built-in rules (copied from OCR `system_rules.json` + `rule_docs/`).
+### Custom rules
 
-P1 (planned): `.code-review.yaml` at repo root, falling back to
-`~/.code-review/rules.yaml`, falling back to built-in.
+Place a `.code-review.yaml` (or `.code-review.yml`, or `.code-review.json`) at
+your repo root. The first existing file wins; rules, `include`, and `exclude`
+are not merged across files.
 
-## 7. Troubleshooting
+```yaml
+rules:
+  - path: "src/**/*.ts"
+    rule: "Focus on type safety, async error handling, and boundary conditions."
+include:
+  - "src/**/*.ts"
+exclude:
+  - "**/*.test.ts"
+```
+
+- `rules[].path` supports `**` / `*` / `?` / `{a,b}` globs; first match wins.
+- `include` / `exclude` control which changed files enter the review scope. When `include` is set, only matching files are reviewed and default excludes (test files, etc.) are skipped for them.
+- When no custom rule matches a file, the built-in `system_rules.json` + `rule_docs/` apply.
+
+Override or point at a one-off rule file with `--rules <path>` (alias `--rule <path>`):
+
+```
+/open-code-review:review --rules ./ci-rules.yaml
+```
+
+Rule file errors are hard failures (`OCRP-RULES-090`…`093`) — they do not silently fall back to defaults.
+
+## 7. Preview and dry-run
+
+Inspect what would be reviewed without invoking Claude Code subagents.
+
+- `--preview` (alias `-p`): prints which files would be reviewed, their rule source, and which files are excluded and why. Writes no artifacts.
+- `--dry-run`: same no-LLM preparation, but writes `.ocr-runs/<runId>/context.json` and `.ocr-runs/<runId>/preview.json` for CI and scripting.
+
+```
+/open-code-review:review --preview
+/open-code-review:review --dry-run
+```
+
+`--preview` and `--dry-run` are mutually exclusive. Neither runs plan, reviewer, filter, relocation, or aggregate.
+
+## 8. Troubleshooting
 
 | Error code | Meaning | Fix |
 |---|---|---|
@@ -102,6 +139,10 @@ P1 (planned): `.code-review.yaml` at repo root, falling back to
 | `OCRP-RUN-010` | Not in a git repo | `cd` to a repo root |
 | `OCRP-RUN-011` | Argument conflict or unsupported P0 flag | Use only one review target and avoid P1 flags such as --rules/--preview/--dry-run |
 | `OCRP-RUN-012` | No changes | Stage something or pick a non-trivial range |
+| `OCRP-RULES-090` | Custom rule file missing/unreadable | Fix the `--rules` path or `.code-review.yaml` |
+| `OCRP-RULES-091` | Rule file JSON/YAML parse failure | Fix the syntax |
+| `OCRP-RULES-092` | Rule file root is not an object | Use a mapping/object root |
+| `OCRP-RULES-093` | Invalid rule entry or include/exclude | Ensure rules have string `path`/`rule`, and include/exclude are string arrays |
 | `OCRP-SKILL-040` | PLAN output unparseable | Already downgraded; main review still runs |
 | `OCRP-SUB-050/051` | Some subagents did not finish | Report flagged `partial: true` |
 | `OCRP-HOOK-060` | Hook failed | Silent; final result unaffected |
@@ -112,7 +153,7 @@ P1 (planned): `.code-review.yaml` at repo root, falling back to
 | `OCRP-RELOCATE-081` | Relocation path outside context | Check relocation input path |
 | `OCRP-RELOCATE-082` | Malformed relocation decision | Check relocation audit format |
 
-## 8. Development
+## 9. Development
 
 ```bash
 npm test          # node --test on all src/**/__tests__/*.test.ts
@@ -133,7 +174,7 @@ Directory contract (see spec §2):
 - `src/host/claude-code/*` — host-specific code
 - `src/cli/*` — bin/ entry points
 
-## 9. License
+## 10. License
 
 Apache-2.0 (same as OCR upstream). See [LICENSE](LICENSE).
 
