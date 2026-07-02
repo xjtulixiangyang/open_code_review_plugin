@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, extname } from 'node:path';
+import type { LoadedCustomRules } from '../rules/custom_rules.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -83,4 +84,48 @@ export function isAllowed(path: string, extraExclude: string[] = []): boolean {
   if (matchAny(path, loadDefaultExcludes())) return false;
   if (extraExclude.length > 0 && matchAny(path, extraExclude)) return false;
   return true;
+}
+
+export type FileScopeReason =
+  | 'unsupported-ext'
+  | 'user-exclude'
+  | 'not-in-include'
+  | 'default-exclude'
+  | 'ok';
+
+/**
+ * 组合判断文件是否进入 review：
+ * 1. 扩展名不在 supported list → excluded
+ * 2. 命中用户 exclude → excluded
+ * 3. 配置了 include 时，未命中 → excluded
+ * 4. include 命中 → reviewed (跳过默认 exclude)
+ * 5. 无 include 时命中默认 exclude → excluded
+ * 6. 否则 reviewed
+ */
+export function isFileInScope(
+  filePath: string,
+  custom: LoadedCustomRules | null,
+): { allowed: boolean; reason: FileScopeReason } {
+  const ext = extname(filePath);
+  const exts = loadSupportedExtensions();
+  if (!exts.includes(ext)) return { allowed: false, reason: 'unsupported-ext' };
+
+  const exclude = custom?.exclude ?? [];
+  if (exclude.length > 0 && matchAny(filePath, exclude)) {
+    return { allowed: false, reason: 'user-exclude' };
+  }
+
+  const include = custom?.include ?? [];
+  if (include.length > 0) {
+    if (!matchAny(filePath, include)) {
+      return { allowed: false, reason: 'not-in-include' };
+    }
+    return { allowed: true, reason: 'ok' };
+  }
+
+  if (matchAny(filePath, loadDefaultExcludes())) {
+    return { allowed: false, reason: 'default-exclude' };
+  }
+
+  return { allowed: true, reason: 'ok' };
 }
