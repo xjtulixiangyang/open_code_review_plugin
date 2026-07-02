@@ -41,6 +41,7 @@ export interface ReviewRequest {
   paths?: string[];
   background?: string;
   rulesPath?: string;
+  preview?: boolean;
   dryRun?: boolean;
   format?: 'markdown' | 'json' | 'both';
   concurrency?: number;
@@ -58,4 +59,8 @@ export interface ReviewContext {
     generatedAt: string;
     pluginVersion: string;
   };
+  rulesSource?: string;
+  excludedFiles?: Array<{ path: string; reason: string }>;
+  preview?: boolean;
+  dryRun?: boolean;
 }
