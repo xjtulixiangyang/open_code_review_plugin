@@ -27,6 +27,28 @@ Capture the stdout JSON. It contains `runId`, `fileCount`, `hunkCount`, `changed
 If `fileCount` is 0 → tell the user "No changes to review." and stop. This is a successful skipped review, not a hard failure.
 If the command exits non-zero → surface the stderr to the user and stop.
 
+### Step 1.5 — Preview / dry-run short-circuit
+
+Parse the `ocr-prepare` stdout JSON.
+
+- If `preview == true`:
+  - Do NOT run plan, reviewer, filter, relocation, or aggregate.
+  - Present a summary to the user:
+    - review range
+    - rules source (`rulesSource`)
+    - file count / excluded count / hunk count / changed lines
+    - the `files[]` list (path, status, hunkCount, changedLines, ruleId, ruleSource)
+    - the `excludedFiles[]` list (path, reason)
+  - Stop. No artifacts are written.
+- If `dryRun == true`:
+  - Do NOT run plan, reviewer, filter, relocation, or aggregate.
+  - Tell the user the artifacts were written and where:
+    - `<repo>/.ocr-runs/<runId>/context.json`
+    - `<repo>/.ocr-runs/<runId>/preview.json`
+  - Present the same `files[]` / `excludedFiles[]` summary as preview.
+  - Stop.
+- Otherwise continue to Step 2.
+
 ### Step 2 — Plan (only when changedLines >= 50)
 
 If `changedLines >= 50`:
@@ -62,7 +84,9 @@ For each file in `context.files[]`:
    changeFiles: <comma-joined list>
    requirementBackground: <background or "">
    systemRule:
-   <contents of assets/rule_docs/<rulesHit[0].docPath> verbatim>
+   <If `rulesHit[0].docPath` is present: read `assets/rule_docs/<docPath>` verbatim.
+    If `docPath` is absent but `rulesHit[0].message` is non-empty: use that message text verbatim.
+    Otherwise: read `assets/rule_docs/default.md` verbatim.>
    planGuidance:
    <planGuidance string or "">
    currentSystemDateTime: <ISO-8601>
@@ -128,8 +152,12 @@ If `partial == true`, prefix your message with: `⚠️ Some files did not compl
 |---|---|
 | OCRP-LOAD-002 | "Plugin not built — please run `npm run build` in the plugin directory." |
 | OCRP-RUN-010 | "Not a git repository at `<cwd>`. Run `/review` inside a git repo." |
-| OCRP-RUN-011 | "Argument conflict or unsupported P0 flag: <message>. Use only one review target and avoid P1 flags such as --rules/--preview/--dry-run." |
+| OCRP-RUN-011 | "Argument conflict or unsupported flag: <message>. Use one review target and valid flag values." |
 | OCRP-RUN-012 | "No changes to review." (exit 0) |
+| OCRP-RULES-090 | Custom rule file missing/unreadable. Fix the `--rules` path or `.code-review.yaml`. |
+| OCRP-RULES-091 | Rule file JSON/YAML parse failure. Fix the syntax. |
+| OCRP-RULES-092 | Rule file root is not an object. |
+| OCRP-RULES-093 | A rule entry or include/exclude field is invalid. |
 | OCRP-SKILL-040 | Continue without plan_guidance; mention in the final report. |
 | OCRP-SUB-050/051 | Already surfaced by `ocr-aggregate` as partial. |
 | OCRP-HOOK-060 | Silent; jsonl bus still works. |
