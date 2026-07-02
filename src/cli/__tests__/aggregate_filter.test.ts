@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { appendFile, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFile } from 'node:child_process';
@@ -88,7 +88,7 @@ test('aggregate hides comments listed in filter results and reports counts', asy
   }
 });
 
-test('aggregate warns when code_comment hook event is malformed', async () => {
+test('aggregate warns when code_comment hook event is malformed without marking the review partial', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'ocrp-aggregate-event-warning-'));
   const oldCwd = process.cwd();
   try {
@@ -101,12 +101,60 @@ test('aggregate warns when code_comment hook event is malformed', async () => {
     const { stdout } = await runAggregate(dir, ['--runId', 'run1', '--format', 'both']);
     const summary = JSON.parse(stdout) as { partial: boolean; eventWarnings: Array<{ reason: string }> };
 
-    assert.equal(summary.partial, true);
+    assert.equal(summary.partial, false);
     assert.match(summary.eventWarnings[0].reason, /malformed code_comment/);
 
     const reportJson = JSON.parse(await readFile(join(dir, '.ocr-runs/run1/report.json'), 'utf8'));
-    assert.equal(reportJson.status, 'completed_with_warnings');
+    assert.equal(reportJson.status, 'success');
     assert.match(reportJson.warnings[0].reason, /malformed code_comment/);
+  } finally {
+    process.chdir(oldCwd);
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('aggregate ignores malformed event jsonl lines and still reports valid event warnings', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'ocrp-aggregate-event-parse-'));
+  const oldCwd = process.cwd();
+  try {
+    process.chdir(dir);
+    await writeContext('run1', CTX);
+    await appendFile(join(dir, '.ocr-runs/run1/events.jsonl'), '{bad json\n', 'utf8');
+    await appendEvent('run1', { type: 'tool_call', tool: 'code_comment', args: { runId: 'run1' } });
+    await markDone('run1', 'reviewer-a', 'src/a.ts');
+    process.chdir(oldCwd);
+
+    const { stdout } = await runAggregate(dir, ['--runId', 'run1', '--format', 'json']);
+    const summary = JSON.parse(stdout) as { partial: boolean; eventWarnings: Array<{ reason: string }> };
+
+    assert.equal(summary.partial, false);
+    assert.equal(summary.eventWarnings.length, 1);
+    assert.match(summary.eventWarnings[0].reason, /malformed code_comment/);
+  } finally {
+    process.chdir(oldCwd);
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('aggregate escapes markdown warning fields', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'ocrp-aggregate-warning-md-'));
+  const oldCwd = process.cwd();
+  try {
+    process.chdir(dir);
+    await writeContext('run1', CTX);
+    await appendEvent('run1', {
+      type: 'tool_call',
+      tool: 'code_comment',
+      args: { path: 'src/[a](b).ts\n- injected', runId: 'run1' },
+    });
+    await markDone('run1', 'reviewer-a', 'src/a.ts');
+    process.chdir(oldCwd);
+
+    await runAggregate(dir, ['--runId', 'run1', '--format', 'markdown']);
+
+    const reportMd = await readFile(join(dir, '.ocr-runs/run1/report.md'), 'utf8');
+    assert.match(reportMd, /src\/\\\[a\\\]\\\(b\\\)\\\.ts\\n\\- injected/);
+    assert.doesNotMatch(reportMd, /^- injected/m);
   } finally {
     process.chdir(oldCwd);
     await rm(dir, { recursive: true, force: true });

@@ -6,6 +6,10 @@ import type { RelocationWarning } from '../model/relocation.js';
 export type ReportComment = LlmComment & { comment_id?: string };
 export interface ReportWarning { path: string; reason: string }
 
+function partialWarnings(partialFiles: string[]): ReportWarning[] {
+  return partialFiles.map((p) => ({ path: p, reason: 'subagent did not call task_done' }));
+}
+
 /**
  * OCR-compatible report JSON. 字段与 OCR `cmd/opencodereview/output.go::outputJSONWithWarnings` 对齐。
  */
@@ -52,11 +56,11 @@ export function renderJsonReport(
     return rest;
   });
   const warnings = [
-    ...opts.partialFiles.map((p) => ({ path: p, reason: 'subagent did not call task_done' })),
+    ...partialWarnings(opts.partialFiles),
     ...(opts.warnings ?? []),
   ];
   const r: ReportJson = {
-    status: warnings.length > 0 ? 'completed_with_warnings' : 'success',
+    status: opts.partialFiles.length > 0 ? 'completed_with_warnings' : 'success',
     summary: {
       files_reviewed: ctx.files.length,
       comments: lite.length,

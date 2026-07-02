@@ -177,7 +177,7 @@ async function main(): Promise<void> {
       runId: f.runId,
       reportMd: `.ocr-runs/${f.runId}/report.md`,
       reportJson: `.ocr-runs/${f.runId}/report.json`,
-      partial: partialFiles.length > 0 || warnings.length > 0,
+      partial: partialFiles.length > 0,
       filesReviewed: ctx.files.length,
       rawCommentCount: rawComments.length,
       commentCount: comments.length,

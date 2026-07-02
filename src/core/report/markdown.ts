@@ -2,6 +2,13 @@ import type { ReviewContext } from '../model/request.js';
 import type { CommentRecord } from '../model/comment.js';
 import type { ReportWarning } from './json.js';
 
+function escapeMarkdownText(text: string): string {
+  return text
+    .replace(/\\/g, '\\\\')
+    .replace(/\n/g, '\\n')
+    .replace(/([*_\[\]()`~>#+\-=|{}.!])/g, '\\$1');
+}
+
 export interface RenderOpts {
   partialFiles: string[];
   rawCommentCount?: number;
@@ -35,7 +42,7 @@ export function renderMarkdownReport(
   if (warnings.length > 0) {
     lines.push('## ⚠️ Warnings', '');
     for (const warning of warnings) {
-      lines.push(`- ${warning.path} ${warning.reason}`);
+      lines.push(`- ${escapeMarkdownText(warning.path)} ${escapeMarkdownText(warning.reason)}`);
     }
     lines.push('');
   }

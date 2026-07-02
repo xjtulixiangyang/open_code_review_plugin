@@ -145,7 +145,13 @@ export async function readEvents<T = unknown>(runId: string): Promise<T[]> {
   return body
     .split('\n')
     .filter((l) => l.trim().length > 0)
-    .map((l) => JSON.parse(l) as T);
+    .flatMap((l) => {
+      try {
+        return [JSON.parse(l) as T];
+      } catch {
+        return [];
+      }
+    });
 }
 
 export async function markDone(
