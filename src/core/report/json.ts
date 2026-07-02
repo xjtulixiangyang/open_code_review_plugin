@@ -4,6 +4,7 @@ import type { FilterWarning } from '../model/filter.js';
 import type { RelocationWarning } from '../model/relocation.js';
 
 export type ReportComment = LlmComment & { comment_id?: string };
+export interface ReportWarning { path: string; reason: string }
 
 /**
  * OCR-compatible report JSON. 字段与 OCR `cmd/opencodereview/output.go::outputJSONWithWarnings` 对齐。
@@ -26,7 +27,7 @@ export interface ReportJson {
     duration_ms: number;
   };
   comments: ReportComment[];
-  warnings: Array<{ path: string; reason: string }>;
+  warnings: ReportWarning[];
   filter_warnings?: FilterWarning[];
   relocation_warnings?: RelocationWarning[];
 }
@@ -43,14 +44,19 @@ export function renderJsonReport(
     relocatedCount?: number;
     relocationFallbackCount?: number;
     relocationWarnings?: RelocationWarning[];
+    warnings?: ReportWarning[];
   },
 ): string {
   const lite: ReportComment[] = comments.map((c) => {
     const { _meta, ...rest } = c;
     return rest;
   });
+  const warnings = [
+    ...opts.partialFiles.map((p) => ({ path: p, reason: 'subagent did not call task_done' })),
+    ...(opts.warnings ?? []),
+  ];
   const r: ReportJson = {
-    status: opts.partialFiles.length > 0 ? 'completed_with_warnings' : 'success',
+    status: warnings.length > 0 ? 'completed_with_warnings' : 'success',
     summary: {
       files_reviewed: ctx.files.length,
       comments: lite.length,
@@ -66,7 +72,7 @@ export function renderJsonReport(
       duration_ms: opts.durationMs,
     },
     comments: lite,
-    warnings: opts.partialFiles.map((p) => ({ path: p, reason: 'subagent did not call task_done' })),
+    warnings,
   };
   if (opts.filterWarnings && opts.filterWarnings.length > 0) r.filter_warnings = opts.filterWarnings;
   if (opts.relocationWarnings && opts.relocationWarnings.length > 0) r.relocation_warnings = opts.relocationWarnings;

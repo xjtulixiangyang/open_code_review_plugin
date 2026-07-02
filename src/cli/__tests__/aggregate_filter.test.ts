@@ -5,7 +5,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { appendComment, writeContext, writeFilterResult } from '../../core/runs/store.js';
+import { appendComment, appendEvent, markDone, writeContext, writeFilterResult } from '../../core/runs/store.js';
 import type { ReviewContext } from '../../core/model/request.js';
 import type { CommentRecord } from '../../core/model/comment.js';
 
@@ -82,6 +82,31 @@ test('aggregate hides comments listed in filter results and reports counts', asy
     assert.equal(reportJson.summary.filtered_comments, 1);
     assert.equal(reportJson.comments.length, 1);
     assert.equal(reportJson.comments[0].comment_id, KEEP.comment_id);
+  } finally {
+    process.chdir(oldCwd);
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('aggregate warns when code_comment hook event is malformed', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'ocrp-aggregate-event-warning-'));
+  const oldCwd = process.cwd();
+  try {
+    process.chdir(dir);
+    await writeContext('run1', CTX);
+    await appendEvent('run1', { type: 'tool_call', tool: 'code_comment', args: { runId: 'run1' } });
+    await markDone('run1', 'reviewer-a', 'src/a.ts');
+    process.chdir(oldCwd);
+
+    const { stdout } = await runAggregate(dir, ['--runId', 'run1', '--format', 'both']);
+    const summary = JSON.parse(stdout) as { partial: boolean; eventWarnings: Array<{ reason: string }> };
+
+    assert.equal(summary.partial, true);
+    assert.match(summary.eventWarnings[0].reason, /malformed code_comment/);
+
+    const reportJson = JSON.parse(await readFile(join(dir, '.ocr-runs/run1/report.json'), 'utf8'));
+    assert.equal(reportJson.status, 'completed_with_warnings');
+    assert.match(reportJson.warnings[0].reason, /malformed code_comment/);
   } finally {
     process.chdir(oldCwd);
     await rm(dir, { recursive: true, force: true });

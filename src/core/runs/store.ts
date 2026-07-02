@@ -133,6 +133,21 @@ export async function appendEvent(runId: string, e: object): Promise<void> {
   });
 }
 
+export async function readEvents<T = unknown>(runId: string): Promise<T[]> {
+  const file = join(await resolveRunDir(runId), 'events.jsonl');
+  let body: string;
+  try {
+    body = await readFile(file, 'utf8');
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return [];
+    throw err;
+  }
+  return body
+    .split('\n')
+    .filter((l) => l.trim().length > 0)
+    .map((l) => JSON.parse(l) as T);
+}
+
 export async function markDone(
   runId: string,
   subagent: string,

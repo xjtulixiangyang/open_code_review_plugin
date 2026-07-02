@@ -1,5 +1,6 @@
 import type { ReviewContext } from '../model/request.js';
 import type { CommentRecord } from '../model/comment.js';
+import type { ReportWarning } from './json.js';
 
 export interface RenderOpts {
   partialFiles: string[];
@@ -7,6 +8,7 @@ export interface RenderOpts {
   filteredCommentCount?: number;
   relocatedCount?: number;
   relocationFallbackCount?: number;
+  warnings?: ReportWarning[];
 }
 
 /**
@@ -25,11 +27,15 @@ export function renderMarkdownReport(
   opts: RenderOpts,
 ): string {
   const lines: string[] = [];
+  const warnings = [
+    ...opts.partialFiles.map((path) => ({ path, reason: 'subagent 未调用 task_done; partial=true' })),
+    ...(opts.warnings ?? []),
+  ];
 
-  if (opts.partialFiles.length > 0) {
+  if (warnings.length > 0) {
     lines.push('## ⚠️ Warnings', '');
-    for (const p of opts.partialFiles) {
-      lines.push(`- ${p} 评审未完成 (subagent 未调用 task_done; partial=true)`);
+    for (const warning of warnings) {
+      lines.push(`- ${warning.path} ${warning.reason}`);
     }
     lines.push('');
   }

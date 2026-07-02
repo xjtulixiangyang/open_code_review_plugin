@@ -4,6 +4,7 @@ import {
   readComments,
   readFilterResults,
   readRelocationResults,
+  readEvents,
   listDone,
   writeReport,
 } from '../core/runs/store.js';
@@ -12,6 +13,28 @@ import { renderJsonReport } from '../core/report/json.js';
 import type { ReviewContext } from '../core/model/request.js';
 import type { CommentRecord } from '../core/model/comment.js';
 import type { RelocationWarning } from '../core/model/relocation.js';
+import type { ReportWarning } from '../core/report/json.js';
+
+interface ToolCallEvent {
+  type?: string;
+  tool?: string;
+  args?: Record<string, unknown>;
+}
+
+function eventWarnings(events: ToolCallEvent[]): ReportWarning[] {
+  const warnings: ReportWarning[] = [];
+  for (const event of events) {
+    if (event.type !== 'tool_call' || event.tool !== 'code_comment') continue;
+    const args = event.args ?? {};
+    if (typeof args.path !== 'string' || typeof args.subagent !== 'string') {
+      warnings.push({
+        path: typeof args.path === 'string' ? args.path : '<unknown>',
+        reason: 'malformed code_comment tool call: missing parsed path/subagent; comment may have been dropped',
+      });
+    }
+  }
+  return warnings;
+}
 
 function parseFlags(argv: string[]): Record<string, string> {
   const out: Record<string, string> = {};
@@ -37,6 +60,8 @@ async function main(): Promise<void> {
   const format = f.format ?? 'both';
 
   const ctx = await readContext<ReviewContext>(f.runId);
+  const events = await readEvents<ToolCallEvent>(f.runId);
+  const warnings = eventWarnings(events);
   const rawComments = await readComments<CommentRecord>(f.runId);
   const filters = await readFilterResults(f.runId);
   const contextPaths = new Set(ctx.files.map((file) => file.path));
@@ -129,6 +154,7 @@ async function main(): Promise<void> {
       filteredCommentCount,
       relocatedCount,
       relocationFallbackCount,
+      warnings,
     });
     await writeReport(f.runId, 'report.md', md);
   }
@@ -142,6 +168,7 @@ async function main(): Promise<void> {
       relocatedCount,
       relocationFallbackCount,
       relocationWarnings,
+      warnings,
     });
     await writeReport(f.runId, 'report.json', j);
   }
@@ -150,13 +177,14 @@ async function main(): Promise<void> {
       runId: f.runId,
       reportMd: `.ocr-runs/${f.runId}/report.md`,
       reportJson: `.ocr-runs/${f.runId}/report.json`,
-      partial: partialFiles.length > 0,
+      partial: partialFiles.length > 0 || warnings.length > 0,
       filesReviewed: ctx.files.length,
       rawCommentCount: rawComments.length,
       commentCount: comments.length,
       filteredCommentCount,
       filterWarnings,
       relocationWarnings,
+      eventWarnings: warnings,
       partialFiles,
     }, null, 2) + '\n',
   );
