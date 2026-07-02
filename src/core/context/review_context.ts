@@ -1,8 +1,9 @@
 import { gitRevParseToplevel, gitDiff } from '../diff/git.js';
 import { collectWorkspaceDiff } from '../diff/workspace.js';
 import { parseUnifiedDiff } from '../diff/parser.js';
-import { isAllowed } from '../allowlist/allowed_ext.js';
-import { buildSystemRulePrompt } from '../rules/matcher.js';
+import { isFileInScope } from '../allowlist/allowed_ext.js';
+import { resolveRule } from '../rules/matcher.js';
+import { loadCustomRules } from '../rules/custom_rules.js';
 import { MAX_HUNK_LINES, PLUGIN_VERSION } from '../prompts/constants.js';
 import { newRunId } from '../runs/store.js';
 import type { ReviewRequest, ReviewContext, FileChange } from '../model/request.js';
@@ -15,6 +16,8 @@ export async function buildReviewContext(req: ReviewRequest): Promise<ReviewCont
     const msg = err instanceof Error ? err.message : String(err);
     throw new Error(`OCRP-RUN-010: Not a git repository at ${req.repoRoot}: ${msg}`);
   }
+
+  const custom = await loadCustomRules(repoRoot, req.rulesPath);
 
   let diffText: string;
   let rangeLabel: string;
@@ -36,19 +39,32 @@ export async function buildReviewContext(req: ReviewRequest): Promise<ReviewCont
   }
 
   const maxHunkLines = req.maxHunkLines ?? MAX_HUNK_LINES;
-  let files: FileChange[] = parseUnifiedDiff(diffText, { maxHunkLines });
+  const parsed: FileChange[] = parseUnifiedDiff(diffText, { maxHunkLines });
 
-  // allowlist 过滤
-  files = files.filter((f) => isAllowed(f.path));
+  // scope 过滤：扩展名 + include/exclude + 默认排除
+  const files: FileChange[] = [];
+  const excludedFiles: Array<{ path: string; reason: string }> = [];
+  for (const f of parsed) {
+    const scope = isFileInScope(f.path, custom);
+    if (scope.allowed) {
+      files.push(f);
+    } else {
+      excludedFiles.push({ path: f.path, reason: scope.reason });
+    }
+  }
 
-  // 规则匹配
+  // 规则匹配：自定义优先，内置回退
   for (const f of files) {
-    const rule = buildSystemRulePrompt(f.path);
-    f.rulesHit = [{ ruleId: rule.ruleId, message: '', docPath: rule.docPath }];
+    const rule = resolveRule(f.path, custom);
+    f.rulesHit = [{
+      ruleId: rule.ruleId,
+      message: rule.source === 'custom' ? rule.text : '',
+      docPath: rule.docPath,
+    }];
   }
 
   const runId = newRunId();
-  return {
+  const ctx: ReviewContext = {
     runId,
     repoRoot,
     range: rangeLabel,
@@ -56,5 +72,10 @@ export async function buildReviewContext(req: ReviewRequest): Promise<ReviewCont
     files,
     changeFiles: files.map((f) => f.path),
     meta: { generatedAt: new Date().toISOString(), pluginVersion: PLUGIN_VERSION },
+    rulesSource: custom.source,
+    excludedFiles: excludedFiles.length > 0 ? excludedFiles : undefined,
   };
+  if (req.preview) ctx.preview = true;
+  if (req.dryRun) ctx.dryRun = true;
+  return ctx;
 }
