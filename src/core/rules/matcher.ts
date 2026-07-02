@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { globToRegExp } from '../allowlist/allowed_ext.js';
+import type { LoadedCustomRules } from './custom_rules.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -67,4 +68,33 @@ export function buildSystemRulePrompt(filePath: string): {
 } {
   const m = matchRule(filePath);
   return { ...m, text: loadRuleDocText(m.docPath) };
+}
+
+export interface RuleResolution {
+  ruleId: string;
+  docPath?: string;
+  text: string;
+  source: 'custom' | 'system';
+}
+
+/**
+ * 自定义规则优先，first-match-wins；未命中回退内置规则。
+ * custom: docPath=undefined, text=rule 文本。
+ * system: docPath=内置 doc 名, text=doc 文件内容。
+ */
+export function resolveRule(filePath: string, custom: LoadedCustomRules | null): RuleResolution {
+  if (custom && custom.rules.length > 0) {
+    for (const entry of custom.rules) {
+      if (globToRegExp(entry.path).test(filePath)) {
+        return {
+          ruleId: `custom:${entry.path}`,
+          docPath: undefined,
+          text: entry.rule,
+          source: 'custom',
+        };
+      }
+    }
+  }
+  const sys = buildSystemRulePrompt(filePath);
+  return { ruleId: sys.ruleId, docPath: sys.docPath, text: sys.text, source: 'system' };
 }
