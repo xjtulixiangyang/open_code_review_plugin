@@ -1,8 +1,21 @@
 import type { ReviewContext } from '../model/request.js';
 import type { CommentRecord } from '../model/comment.js';
+import type { ReportWarning } from './json.js';
+
+function escapeMarkdownText(text: string): string {
+  return text
+    .replace(/\\/g, '\\\\')
+    .replace(/\n/g, '\\n')
+    .replace(/([*_\[\]()`~>#+\-=|{}.!])/g, '\\$1');
+}
 
 export interface RenderOpts {
   partialFiles: string[];
+  rawCommentCount?: number;
+  filteredCommentCount?: number;
+  relocatedCount?: number;
+  relocationFallbackCount?: number;
+  warnings?: ReportWarning[];
 }
 
 /**
@@ -21,11 +34,15 @@ export function renderMarkdownReport(
   opts: RenderOpts,
 ): string {
   const lines: string[] = [];
+  const warnings = [
+    ...opts.partialFiles.map((path) => ({ path, reason: 'subagent 未调用 task_done; partial=true' })),
+    ...(opts.warnings ?? []),
+  ];
 
-  if (opts.partialFiles.length > 0) {
+  if (warnings.length > 0) {
     lines.push('## ⚠️ Warnings', '');
-    for (const p of opts.partialFiles) {
-      lines.push(`- ${p} 评审未完成 (subagent 未调用 task_done; partial=true)`);
+    for (const warning of warnings) {
+      lines.push(`- ${escapeMarkdownText(warning.path)} ${escapeMarkdownText(warning.reason)}`);
     }
     lines.push('');
   }
@@ -35,6 +52,14 @@ export function renderMarkdownReport(
   lines.push(`**Range**: \`${ctx.range}\`  `);
   lines.push(`**Files reviewed**: ${ctx.files.length}  `);
   lines.push(`**Issues found**: ${comments.length}`);
+  if ((opts.filteredCommentCount ?? 0) > 0) {
+    lines.push(`**Filtered**: ${opts.filteredCommentCount} (hidden from raw ${opts.rawCommentCount ?? comments.length})  `);
+  }
+  const relocCount = opts.relocatedCount ?? 0;
+  const fbCount = opts.relocationFallbackCount ?? 0;
+  if (relocCount > 0 || fbCount > 0) {
+    lines.push(`**Relocated**: ${relocCount} (fallback ${fbCount})  `);
+  }
   lines.push('');
 
   if (comments.length === 0) {

@@ -8,12 +8,18 @@ import { newRunId } from '../runs/store.js';
 import type { ReviewRequest, ReviewContext, FileChange } from '../model/request.js';
 
 export async function buildReviewContext(req: ReviewRequest): Promise<ReviewContext> {
-  const repoRoot = await gitRevParseToplevel(req.repoRoot);
+  let repoRoot: string;
+  try {
+    repoRoot = await gitRevParseToplevel(req.repoRoot);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    throw new Error(`OCRP-RUN-010: Not a git repository at ${req.repoRoot}: ${msg}`);
+  }
 
   let diffText: string;
   let rangeLabel: string;
   if (req.mode === 'workspace') {
-    diffText = await collectWorkspaceDiff(repoRoot);
+    diffText = await collectWorkspaceDiff(repoRoot, req.paths);
     rangeLabel = 'workspace';
   } else if (req.mode === 'staged') {
     diffText = await gitDiff({ repoRoot, range: 'staged', paths: req.paths });

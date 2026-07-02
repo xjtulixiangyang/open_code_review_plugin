@@ -41,10 +41,13 @@ Please keep your responses concise and objective.
 - To read a file: use the **Read** tool.
 - To find files by pattern: use the **Glob** tool.
 - To search code text: use the **Grep** tool.
-- To read another changed file's diff: run **Bash** with `file_read_diff --runId <runId> --path <path>`.
-- To submit a confirmed review comment: run **Bash** with:
-  `code_comment --runId <runId> --path <p> --start <n> --end <m> --content <text> [--suggestion-code <code>] [--existing-code <code>] [--thinking <text>] --subagent <subagent_id>`
-- When your review is complete, run **Bash** with: `task_done --runId <runId> --subagent <subagent_id> --file <currentFilePath>`.
+- To read another changed file's diff: run **Bash** with
+  `file_read_diff --runId <runId> --args '{"path_array":["<path1>","<path2>"]}'`.
+- To submit a confirmed review comment (or multiple): run **Bash** with
+  `code_comment --runId <runId> --args '{"path":"<p>","subagent":"<subagent_id>","comments":[{"start_line":<n>,"end_line":<m>,"content":"<text>","suggestion_code":"<code>","existing_code":"<code>","thinking":"<text>"}]}'`
+  (omit `suggestion_code` / `existing_code` / `thinking` when not applicable; multiple comments go in the `comments` array.)
+- When your review is complete, run **Bash** with
+  `task_done --runId <runId> --args '{"subagent":"<subagent_id>","file":"<currentFilePath>"}'`.
 
 ## Reply limit
 

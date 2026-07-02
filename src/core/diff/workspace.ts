@@ -23,11 +23,13 @@ async function rawGitDiffNoIndex(repoRoot: string, file: string): Promise<string
  * 等价于 OCR `workspace` 模式：tracked 改动 + untracked 文件（作为"新增"）拼成一份 unified diff。
  * untracked 文件通过 `git diff --no-index /dev/null <file>` 生成 diff。
  */
-export async function collectWorkspaceDiff(repoRoot: string): Promise<string> {
-  const tracked = await gitDiff({ repoRoot, range: 'workspace' });
+export async function collectWorkspaceDiff(repoRoot: string, paths?: string[]): Promise<string> {
+  const tracked = await gitDiff({ repoRoot, range: 'workspace', paths });
 
   // 列 untracked 文件
-  const lsOut = await runGit(['ls-files', '--others', '--exclude-standard'], { cwd: repoRoot });
+  const lsArgs = ['ls-files', '--others', '--exclude-standard'];
+  if (paths && paths.length > 0) lsArgs.push('--', ...paths);
+  const lsOut = await runGit(lsArgs, { cwd: repoRoot });
   const untracked = lsOut.split('\n').map((s) => s.trim()).filter(Boolean);
 
   let extra = '';

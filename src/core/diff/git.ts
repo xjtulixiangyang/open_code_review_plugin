@@ -50,14 +50,20 @@ export async function gitDiff(opts: DiffOpts): Promise<string> {
   let args: string[];
   if (opts.range === 'workspace') {
     // tracked changes vs HEAD; untracked 单独处理
-    args = ['diff', '--no-color', '-U3', '--no-ext-diff', 'HEAD'];
+    args = ['diff', '--find-renames', '--no-color', '-U3', '--no-ext-diff', 'HEAD'];
   } else if (opts.range === 'staged') {
-    args = ['diff', '--no-color', '-U3', '--no-ext-diff', '--cached'];
+    args = ['diff', '--find-renames', '--no-color', '-U3', '--no-ext-diff', '--cached'];
   } else if (opts.range.startsWith('commit:')) {
     const sha = opts.range.slice('commit:'.length);
-    args = ['diff-tree', '-p', '-r', '--no-color', '-U3', sha];
+    args = ['diff-tree', '-p', '-r', '--find-renames', '--no-color', '-U3', sha];
   } else {
-    args = ['diff', '--no-color', '-U3', '--no-ext-diff', opts.range];
+    const [from, to] = opts.range.split('..');
+    if (from && to) {
+      const mergeBase = (await runGit(['merge-base', from, to], { cwd: opts.repoRoot })).trim();
+      args = ['diff', '--find-renames', '--no-color', '-U3', '--no-ext-diff', mergeBase, to];
+    } else {
+      args = ['diff', '--find-renames', '--no-color', '-U3', '--no-ext-diff', opts.range];
+    }
   }
   if (opts.paths && opts.paths.length > 0) {
     args.push('--', ...opts.paths);

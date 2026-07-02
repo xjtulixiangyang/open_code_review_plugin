@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm, readFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, rm, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -31,6 +31,18 @@ async function setupTempRepo() {
   return { dir, restore: () => process.chdir(cwdBefore) };
 }
 
+function makeContext(id: string, repoRoot: string): ReviewContext {
+  return {
+    runId: id,
+    repoRoot,
+    range: 'workspace',
+    background: '',
+    files: [],
+    changeFiles: [],
+    meta: { generatedAt: new Date().toISOString(), pluginVersion: '0.1.0' },
+  };
+}
+
 test.after(async () => {
   for (const d of tempRoots) await rm(d, { recursive: true, force: true });
 });
@@ -58,21 +70,33 @@ test('runDir 返回 .ocr-runs/<runId> 绝对路径', async () => {
 });
 
 test('writeContext + readContext 往返一致', async () => {
-  const { restore } = await setupTempRepo();
+  const { dir, restore } = await setupTempRepo();
   try {
     const id = newRunId();
-    const ctx: ReviewContext = {
-      runId: id,
-      repoRoot: '/abs',
-      range: 'workspace',
-      background: '',
-      files: [],
-      changeFiles: [],
-      meta: { generatedAt: new Date().toISOString(), pluginVersion: '0.1.0' },
-    };
+    const ctx = makeContext(id, dir);
     await writeContext(id, ctx);
     const back = await readContext(id);
     assert.deepEqual(back, ctx);
+  } finally {
+    restore();
+  }
+});
+
+test('run artifacts from a Claude worktree resolve to the parent repo run', async () => {
+  const { dir, restore } = await setupTempRepo();
+  try {
+    const id = newRunId();
+    await writeContext(id, makeContext(id, dir));
+
+    const worktreesDir = join(dir, '.claude', 'worktrees');
+    await mkdir(worktreesDir, { recursive: true });
+    const worktree = await mkdtemp(join(worktreesDir, 'reviewer-a-'));
+    process.chdir(worktree);
+
+    await markDone(id, 'reviewer-a', 'src/a.ts');
+    const dones = await listDone(id);
+    assert.deepEqual(dones, [{ subagent: 'reviewer-a', file: 'src/a.ts' }]);
+    await assert.rejects(readFile(join(worktree, '.ocr-runs', id, 'done', 'reviewer-a.json'), 'utf8'));
   } finally {
     restore();
   }
