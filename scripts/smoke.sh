@@ -121,4 +121,33 @@ RC="$($PLUGIN_ROOT/bin/ocr-rules-check a.ts)"
 echo "[smoke] rules-check: $RC"
 echo "$RC" | grep -q '"docPath": "ts_js_tsx_jsx.md"' || { echo "[smoke] FAIL: rules-check docPath"; exit 1; }
 
+# --- Test 3: custom rules + dry-run (no LLM, no subagents) ---
+echo ""
+echo "=== Test 3: custom rules + dry-run ==="
+
+cat > .code-review.yaml <<'YAML'
+rules:
+  - path: "**/*.ts"
+    rule: "Focus on type safety."
+include:
+  - "**/*.ts"
+YAML
+
+DRY="$($PLUGIN_ROOT/bin/ocr-prepare --dry-run)"
+echo "[smoke] dry-run: $DRY"
+echo "$DRY" | grep -q '"dryRun": true' || { echo "[smoke] FAIL: dryRun not true"; exit 1; }
+echo "$DRY" | grep -q '"rulesSource": ".code-review.yaml"' || { echo "[smoke] FAIL: rulesSource"; exit 1; }
+DRY_RUNID="$(echo "$DRY" | grep -o '"runId": "[^"]*"' | head -1 | cut -d'"' -f4)"
+if [ -z "$DRY_RUNID" ]; then echo "[smoke] FAIL: no dry-run runId"; exit 1; fi
+if [ ! -f ".ocr-runs/$DRY_RUNID/context.json" ]; then echo "[smoke] FAIL: dry-run context.json missing"; exit 1; fi
+if [ ! -f ".ocr-runs/$DRY_RUNID/preview.json" ]; then echo "[smoke] FAIL: dry-run preview.json missing"; exit 1; fi
+echo "PASS: dry-run wrote context.json + preview.json"
+
+# preview must NOT write context.json
+PREV="$($PLUGIN_ROOT/bin/ocr-prepare --preview)"
+echo "[smoke] preview: $PREV"
+echo "$PREV" | grep -q '"preview": true' || { echo "[smoke] FAIL: preview not true"; exit 1; }
+echo "$PREV" | grep -q '"contextPath": null' || { echo "[smoke] FAIL: preview contextPath not null"; exit 1; }
+echo "PASS: preview did not write context.json"
+
 echo "[smoke] PASS"
