@@ -46,10 +46,10 @@ Inside Claude Code:
 |---|---|---|---|---|
 | `-b, --background "ctx"` | same | "" | Injected into reviewer prompt |
 | `--paths "g1,g2"` | include/path filter | — | Limits changed files before review |
-| `--concurrency <n>` | same | 8 | Instructs command orchestration to dispatch at most N reviewers |
+| `--concurrency <n>` | same | 2 | Controls how many file reviewer subagents are dispatched at once. Default is `2` for stability. Values above `8` are capped to `8`. |
 | `--format markdown|json|both` | `--format` | both | Controls aggregate artifacts |
 
-P1 planned flags are parsed defensively but rejected in P0 with `OCRP-RUN-011`: `--rules`, `--preview` / `-p`, and `--dry-run`. This prevents silent false support until custom rules and preview mode are implemented.
+P1 planned flags `--preview` / `-p` and `--dry-run` are parsed defensively but rejected in P0 with `OCRP-RUN-011`. The `--rules` / `--rule` flag is now fully supported (see Configuration).
 
 ## 4. Architecture
 
@@ -81,7 +81,7 @@ JSON reports keep OCR-compatible token summary fields, but P0 sets token counter
 | Per-file concurrency | yes (--concurrency) | yes (subagents) |
 | Report formats | text / json | markdown / json / both |
 | Review comment filtering | yes | yes (host LLM + `ocr-filter-apply`) |
-| Custom rules (.code-review.yaml) | yes | P1 |
+| Custom rules (.code-review.yaml) | yes | yes |
 | GitHub/GitLab PR posting | no | P1 |
 
 If you want a standalone CLI with your own API key → use OCR. If you want to
@@ -89,10 +89,30 @@ review inside an existing Claude Code session → use this plugin.
 
 ## 6. Configuration
 
-P0: only built-in rules (copied from OCR `system_rules.json` + `rule_docs/`).
+### Custom rules
 
-P1 (planned): `.code-review.yaml` at repo root, falling back to
-`~/.code-review/rules.yaml`, falling back to built-in.
+`/open-code-review:review` supports custom rule files loaded in this priority order:
+
+1. CLI `--rules <path>` / `--rule <path>`
+2. Repository `.code-review.yaml`, `.code-review.yml`, or `.code-review.json`
+3. User `~/.code-review/rules.yaml`, `~/.code-review/rules.yml`, or `~/.code-review/rules.json`
+4. Built-in OCR-compatible system rules under `assets/rule_docs/`
+
+YAML/JSON shape:
+
+```yaml
+include:
+  - "src/**/*.ts"
+exclude:
+  - "src/**/*.test.ts"
+rules:
+  - path: "src/**/*.ts"
+    rule: |
+      Review TypeScript changes for API compatibility, async error handling,
+      and unsafe type assertions.
+```
+
+`include` narrows the reviewed file set. `exclude` removes files from the reviewed file set. `rules` are first-match-wins and override the built-in rule text for matching paths.
 
 ## 7. Troubleshooting
 
@@ -100,7 +120,7 @@ P1 (planned): `.code-review.yaml` at repo root, falling back to
 |---|---|---|
 | `OCRP-LOAD-002` | `dist/` missing | `npm run build` |
 | `OCRP-RUN-010` | Not in a git repo | `cd` to a repo root |
-| `OCRP-RUN-011` | Argument conflict or unsupported P0 flag | Use only one review target and avoid P1 flags such as --rules/--preview/--dry-run |
+| `OCRP-RUN-011` | Argument conflict or unsupported P0 flag | Use only one review target and avoid P1 flags such as --preview/--dry-run |
 | `OCRP-RUN-012` | No changes | Stage something or pick a non-trivial range |
 | `OCRP-SKILL-040` | PLAN output unparseable | Already downgraded; main review still runs |
 | `OCRP-SUB-050/051` | Some subagents did not finish | Report flagged `partial: true` |
