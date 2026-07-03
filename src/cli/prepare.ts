@@ -4,19 +4,23 @@ import { writeContext } from '../core/runs/store.js';
 import type { ReviewRequest } from '../core/model/request.js';
 import type { ReviewMode } from '../core/types.js';
 
-interface ParsedArgs {
+export const DEFAULT_REVIEW_CONCURRENCY = 2;
+export const MAX_REVIEW_CONCURRENCY = 8;
+
+export interface ParsedArgs {
   mode: ReviewMode;
   commit?: string;
   from?: string;
   to?: string;
   paths?: string[];
   background?: string;
+  rulesPath?: string;
   format?: 'markdown' | 'json' | 'both';
   concurrency?: number;
   unsupported: string[];
 }
 
-function parseArgs(argv: string[]): ParsedArgs {
+export function parseArgs(argv: string[]): ParsedArgs {
   // 形式参考 OCR ocr review：
   //   --staged | --commit <sha> | --from <a> --to <b> | (default: workspace)
   //   --paths <glob1,glob2> | --background "..." | --rules <path>
@@ -39,9 +43,8 @@ function parseArgs(argv: string[]): ParsedArgs {
       out.to = next();
     } else if (a === '--paths') out.paths = next().split(',');
     else if (a === '--background' || a === '-b') out.background = next();
-    else if (a === '--rules') {
-      out.unsupported.push('--rules is planned for P1 custom rule loading');
-      next();
+    else if (a === '--rules' || a === '--rule') {
+      out.rulesPath = next();
     } else if (a === '--format' || a === '-f') out.format = next() as ParsedArgs['format'];
     else if (a === '--concurrency') out.concurrency = parseInt(next(), 10);
     else if (a === '--dry-run') {
@@ -68,11 +71,21 @@ function parseArgs(argv: string[]): ParsedArgs {
   return out;
 }
 
+export function normalizeConcurrency(value: number | undefined): number {
+  if (value === undefined) return DEFAULT_REVIEW_CONCURRENCY;
+  if (!Number.isFinite(value) || !Number.isInteger(value) || value <= 0) {
+    throw new Error(`OCRP-RUN-011: --concurrency must be a positive integer`);
+  }
+  if (value > MAX_REVIEW_CONCURRENCY) return MAX_REVIEW_CONCURRENCY;
+  return value;
+}
+
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
   if (args.unsupported.length > 0) {
     throw new Error(`OCRP-RUN-011: unsupported P0 flag: ${args.unsupported.join('; ')}`);
   }
+  const concurrency = normalizeConcurrency(args.concurrency);
   const req: ReviewRequest = {
     repoRoot: process.cwd(),
     mode: args.mode,
@@ -81,8 +94,9 @@ async function main(): Promise<void> {
     to: args.to,
     paths: args.paths,
     background: args.background,
+    rulesPath: args.rulesPath,
     format: args.format,
-    concurrency: args.concurrency,
+    concurrency,
   };
   const ctx = await buildReviewContext(req);
   await writeContext(ctx.runId, ctx);
@@ -94,6 +108,7 @@ async function main(): Promise<void> {
       (s, f) => s + f.hunks.reduce((ss, h) => ss + h.lines.filter((l) => l.kind !== ' ').length, 0),
       0,
     ),
+    concurrency,
     contextPath: `.ocr-runs/${ctx.runId}/context.json`,
   };
   process.stdout.write(JSON.stringify(summary, null, 2) + '\n');
