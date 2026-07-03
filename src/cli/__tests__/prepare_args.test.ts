@@ -13,6 +13,12 @@ test('parseArgs accepts --rules and stores rulesPath', () => {
   assert.deepEqual(args.unsupported, []);
 });
 
+test('parseArgs accepts --rule alias and stores rulesPath', () => {
+  const args = parseArgs(['--rule', 'team-rules.yaml']);
+  assert.equal(args.rulesPath, 'team-rules.yaml');
+  assert.deepEqual(args.unsupported, []);
+});
+
 test('parseArgs keeps --preview and --dry-run unsupported in this increment', () => {
   const args = parseArgs(['--preview', '--dry-run']);
   assert.ok(args.unsupported.some((x) => x.includes('--preview')));

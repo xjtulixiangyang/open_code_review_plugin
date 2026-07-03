@@ -136,7 +136,7 @@ If `partial == true`, prefix your message with: `⚠️ Some files did not compl
 |---|---|
 | OCRP-LOAD-002 | "Plugin not built — please run `npm run build` in the plugin directory." |
 | OCRP-RUN-010 | "Not a git repository at `<cwd>`. Run `/review` inside a git repo." |
-| OCRP-RUN-011 | "Argument conflict or unsupported P0 flag: <message>. Use only one review target and avoid P1 flags such as --rules/--preview/--dry-run." |
+| OCRP-RUN-011 | "Argument conflict or unsupported P0 flag: <message>. Use only one review target and avoid P1 flags such as --preview/--dry-run." |
 | OCRP-RUN-012 | "No changes to review." (exit 0) |
 | OCRP-SKILL-040 | Continue without plan_guidance; mention in the final report. |
 | OCRP-SUB-050/051 | Already surfaced by `ocr-aggregate` as partial. |
