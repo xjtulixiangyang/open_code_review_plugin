@@ -20,6 +20,8 @@ export interface RuleHit {
   ruleId: string;
   message: string;
   docPath?: string;
+  source?: 'custom' | 'system';
+  text?: string;
 }
 
 export interface FileChange {
@@ -54,6 +56,8 @@ export interface ReviewContext {
   background: string;
   files: FileChange[];
   changeFiles: string[];
+  rulesSource?: string;
+  excludedFiles?: Array<{ path: string; reason: string }>;
   meta: {
     generatedAt: string;
     pluginVersion: string;

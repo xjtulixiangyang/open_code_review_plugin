@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { globToRegExp } from '../allowlist/allowed_ext.js';
+import type { LoadedCustomRules } from './custom_rules.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -67,4 +68,40 @@ export function buildSystemRulePrompt(filePath: string): {
 } {
   const m = matchRule(filePath);
   return { ...m, text: loadRuleDocText(m.docPath) };
+}
+
+export interface ResolvedRule {
+  ruleId: string;
+  text: string;
+  docPath?: string;
+  source: 'custom' | 'system';
+}
+
+/**
+ * Resolve the applicable rule for a file path.
+ * Checks custom rules first (by path pattern matching); falls back to system rules.
+ */
+export function resolveRule(
+  filePath: string,
+  custom: LoadedCustomRules,
+): ResolvedRule {
+  // Try custom rules first
+  for (const entry of custom.rules) {
+    if (globToRegExp(entry.path).test(filePath)) {
+      return {
+        ruleId: `custom:${filePath}`,
+        text: entry.rule,
+        source: 'custom',
+      };
+    }
+  }
+
+  // Fall back to system rule
+  const sys = buildSystemRulePrompt(filePath);
+  return {
+    ruleId: sys.ruleId,
+    text: sys.text,
+    docPath: sys.docPath,
+    source: 'system',
+  };
 }

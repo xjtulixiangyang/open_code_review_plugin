@@ -1,8 +1,9 @@
 import { gitRevParseToplevel, gitDiff } from '../diff/git.js';
 import { collectWorkspaceDiff } from '../diff/workspace.js';
 import { parseUnifiedDiff } from '../diff/parser.js';
-import { isAllowed } from '../allowlist/allowed_ext.js';
-import { buildSystemRulePrompt } from '../rules/matcher.js';
+import { isFileInScope } from '../allowlist/allowed_ext.js';
+import { loadCustomRules } from '../rules/custom_rules.js';
+import { resolveRule } from '../rules/matcher.js';
 import { MAX_HUNK_LINES, PLUGIN_VERSION } from '../prompts/constants.js';
 import { newRunId } from '../runs/store.js';
 import type { ReviewRequest, ReviewContext, FileChange } from '../model/request.js';
@@ -38,13 +39,31 @@ export async function buildReviewContext(req: ReviewRequest): Promise<ReviewCont
   const maxHunkLines = req.maxHunkLines ?? MAX_HUNK_LINES;
   let files: FileChange[] = parseUnifiedDiff(diffText, { maxHunkLines });
 
-  // allowlist 过滤
-  files = files.filter((f) => isAllowed(f.path));
+  // Load custom rules and apply file scoping
+  const customRules = await loadCustomRules(repoRoot, req.rulesPath);
+  const excludedFiles: Array<{ path: string; reason: string }> = [];
+  const scopedFiles: FileChange[] = [];
 
-  // 规则匹配
   for (const f of files) {
-    const rule = buildSystemRulePrompt(f.path);
-    f.rulesHit = [{ ruleId: rule.ruleId, message: '', docPath: rule.docPath }];
+    const scope = isFileInScope(f.path, customRules);
+    if (!scope.allowed) {
+      excludedFiles.push({ path: f.path, reason: scope.reason });
+      continue;
+    }
+    scopedFiles.push(f);
+  }
+  files = scopedFiles;
+
+  // Resolve rules for each file (custom first, system fallback)
+  for (const f of files) {
+    const rule = resolveRule(f.path, customRules);
+    f.rulesHit = [{
+      ruleId: rule.ruleId,
+      message: rule.text,
+      docPath: rule.docPath,
+      source: rule.source,
+      text: rule.text,
+    }];
   }
 
   const runId = newRunId();
@@ -55,6 +74,8 @@ export async function buildReviewContext(req: ReviewRequest): Promise<ReviewCont
     background: req.background ?? '',
     files,
     changeFiles: files.map((f) => f.path),
+    rulesSource: customRules.source,
+    excludedFiles,
     meta: { generatedAt: new Date().toISOString(), pluginVersion: PLUGIN_VERSION },
   };
 }

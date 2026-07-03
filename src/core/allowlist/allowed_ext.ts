@@ -84,3 +84,38 @@ export function isAllowed(path: string, extraExclude: string[] = []): boolean {
   if (extraExclude.length > 0 && matchAny(path, extraExclude)) return false;
   return true;
 }
+
+export interface FileScopeResult {
+  allowed: boolean;
+  reason: string;
+}
+
+/**
+ * Check if a file is in scope based on custom include/exclude patterns.
+ * Falls back to isAllowed() when no custom patterns are defined.
+ */
+export function isFileInScope(
+  filePath: string,
+  custom: { include: string[]; exclude: string[] },
+): FileScopeResult {
+  // When custom include is specified, file must match at least one include pattern
+  if (custom.include.length > 0) {
+    if (!matchAny(filePath, custom.include)) {
+      return { allowed: false, reason: 'user-include' };
+    }
+  }
+
+  // Custom exclude always applies
+  if (custom.exclude.length > 0 && matchAny(filePath, custom.exclude)) {
+    return { allowed: false, reason: 'user-exclude' };
+  }
+
+  // If no custom include/exclude, fall back to default allowlist
+  if (custom.include.length === 0 && custom.exclude.length === 0) {
+    if (!isAllowed(filePath)) {
+      return { allowed: false, reason: 'default-exclude' };
+    }
+  }
+
+  return { allowed: true, reason: '' };
+}

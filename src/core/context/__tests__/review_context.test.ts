@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile, mkdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFile } from 'node:child_process';
@@ -12,6 +12,22 @@ const execFileAsync = promisify(execFile);
 async function git(cwd: string, args: string[]): Promise<string> {
   const { stdout } = await execFileAsync('git', args, { cwd });
   return stdout;
+}
+
+async function mkGitRepo(): Promise<string> {
+  const dir = await mkdtemp(join(tmpdir(), 'ocrp-context-'));
+  await git(dir, ['init', '-q']);
+  await git(dir, ['checkout', '-q', '-b', 'main']);
+  await git(dir, ['config', 'user.email', 'test@example.com']);
+  await git(dir, ['config', 'user.name', 'Test User']);
+  await mkdir(join(dir, 'src'), { recursive: true });
+  await writeFile(join(dir, 'src', 'keep.ts'), 'export const keep = 1;\n');
+  await writeFile(join(dir, 'src', 'skip.ts'), 'export const skip = 1;\n');
+  await git(dir, ['add', '.']);
+  await git(dir, ['commit', '-q', '-m', 'init']);
+  await writeFile(join(dir, 'src', 'keep.ts'), 'export const keep = 2;\n');
+  await writeFile(join(dir, 'src', 'skip.ts'), 'export const skip = 2;\n');
+  return dir;
 }
 
 test('workspace mode returns no files when paths filter matches nothing', async () => {
@@ -69,5 +85,58 @@ test('buildReviewContext reports OCRP-RUN-010 outside a git repository', async (
     );
   } finally {
     await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('buildReviewContext applies custom include/exclude and custom rule text', async () => {
+  const repo = await mkGitRepo();
+  try {
+    await writeFile(join(repo, '.code-review.yaml'), [
+      'include:',
+      '  - "src/**/*.ts"',
+      'exclude:',
+      '  - "src/skip.ts"',
+      'rules:',
+      '  - path: "src/keep.ts"',
+      '    rule: "custom keep rule"',
+      '',
+    ].join('\n'));
+
+    const ctx = await buildReviewContext({ repoRoot: repo, mode: 'workspace' });
+
+    assert.equal(ctx.rulesSource, '.code-review.yaml');
+    assert.deepEqual(ctx.changeFiles, ['src/keep.ts']);
+    assert.ok(ctx.excludedFiles?.some((f) => f.path === 'src/skip.ts' && f.reason === 'user-exclude'));
+
+    const hit = ctx.files[0].rulesHit[0];
+    assert.equal(hit.ruleId, 'custom:src/keep.ts');
+    assert.equal(hit.source, 'custom');
+    assert.equal(hit.message, 'custom keep rule');
+    assert.equal(hit.text, 'custom keep rule');
+    assert.equal(hit.docPath, undefined);
+  } finally {
+    await rm(repo, { recursive: true, force: true });
+  }
+});
+
+test('buildReviewContext falls back to system rule when no custom rule matches', async () => {
+  const repo = await mkGitRepo();
+  try {
+    await writeFile(join(repo, '.code-review.yaml'), [
+      'rules:',
+      '  - path: "docs/**"',
+      '    rule: "docs only"',
+      '',
+    ].join('\n'));
+
+    const ctx = await buildReviewContext({ repoRoot: repo, mode: 'workspace' });
+    const hit = ctx.files.find((f) => f.path === 'src/keep.ts')!.rulesHit[0];
+
+    assert.equal(ctx.rulesSource, '.code-review.yaml');
+    assert.equal(hit.source, 'system');
+    assert.equal(hit.docPath, 'ts_js_tsx_jsx.md');
+    assert.ok(hit.text && hit.text.length > 50);
+  } finally {
+    await rm(repo, { recursive: true, force: true });
   }
 });
