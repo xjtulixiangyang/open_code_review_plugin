@@ -22,7 +22,7 @@ Run Bash:
 ocr-prepare $ARGUMENTS
 ```
 
-Capture the stdout JSON. It contains `runId`, `fileCount`, `hunkCount`, `changedLines`, `contextPath`.
+Capture the stdout JSON. It contains `runId`, `fileCount`, `hunkCount`, `changedLines`, `contextPath`, and `concurrency`. If `concurrency` is absent because an older build produced the summary, use `2`.
 
 If `fileCount` is 0 → tell the user "No changes to review." and stop. This is a successful skipped review, not a hard failure.
 If the command exits non-zero → surface the stderr to the user and stop.
@@ -44,31 +44,38 @@ Otherwise skip this step.
 
 ### Step 3 — Dispatch reviewer subagents in parallel
 
-For each file in `context.files[]`:
+Process `context.files[]` in bounded batches. Let `reviewConcurrency = prepareSummary.concurrency || 2`. Dispatch at most `reviewConcurrency` reviewer subagents at the same time. Do not start the next batch until every file in the current batch has either completed review or exhausted its retry attempts.
+
+For each file in a batch:
 
 1. Compute `planGuidance` deterministically. If `.ocr-runs/<runId>/plan.json` exists, run:
    ```bash
    ocr-plan-guidance --runId <runId> --path <currentFilePath>
    ```
    Parse stdout JSON and use its `guidance` field. If the command fails, set `planGuidance = ""` and mention `OCRP-SKILL-040` in the final report. Do not manually re-implement plan filtering in the main conversation.
-2. Dispatch a `ocr-reviewer` subagent (via the Task tool) with a prompt containing exactly:
+2. Compute `systemRule` from `context.files[].rulesHit[0]`:
+   - If `rulesHit[0].text` is a non-empty string, use it verbatim.
+   - Else if `rulesHit[0].message` is a non-empty string, use it verbatim.
+   - Else read `assets/rule_docs/<rulesHit[0].docPath>` verbatim.
+   - Else use an empty string and mention `OCRP-RULES-094` in the final report.
+3. Dispatch a `ocr-reviewer` subagent with a prompt containing exactly:
 
    ```
    runId: <runId>
-   subagent: reviewer-<index>
+   subagent: reviewer-<index>-attempt-<attempt>
    currentFilePath: <path>
    currentFileDiff:
    <fenced diff block>
    changeFiles: <comma-joined list>
    requirementBackground: <background or "">
    systemRule:
-   <contents of assets/rule_docs/<rulesHit[0].docPath> verbatim>
+   <effective systemRule text>
    planGuidance:
    <planGuidance string or "">
    currentSystemDateTime: <ISO-8601>
    ```
-
-Cap concurrency at 8 (override with the `--concurrency <n>` flag in $ARGUMENTS).
+4. Retry reviewer dispatch at most once for the same file when the subagent errors, times out, or returns without a matching `.ocr-runs/<runId>/done/reviewer-*.json` entry for that file. Use `reviewer-<index>-attempt-2` for the retry subagent id. Do not retry a file after `task_done` is recorded.
+5. If both attempts fail, continue to the next file and let `ocr-aggregate` report the file as partial (`OCRP-SUB-050/051`).
 
 ### Step 3.5 — Per-file filter (REVIEW_FILTER_TASK)
 
@@ -82,7 +89,8 @@ After each file's reviewer subagent returns, run the filter stage for that file:
    ```bash
    ocr-filter-apply --runId <runId> --path <currentFilePath> --input '<json string>' --subagent filter-<index>
    ```
-6. If the skill output is unparseable or `ocr-filter-apply` exits non-zero, treat it as a soft failure: continue without filtering this file and mention `OCRP-FILTER-070` in the final report.
+6. If the skill output is unparseable, treat it as a soft failure: continue without filtering this file and mention `OCRP-FILTER-070` in the final report.
+7. If `ocr-filter-apply` exits non-zero, retry the exact same `ocr-filter-apply` command once. If the second attempt also exits non-zero, continue without filtering this file and mention `OCRP-FILTER-070` in the final report.
 
 ### Step 3.6 — Line relocation (RE_LOCATION_TASK)
 
@@ -94,7 +102,7 @@ After each file's filter stage completes, run the line relocation stage for that
    ocr-relocate-apply --runId <runId> --path <currentFilePath>
    ```
 3. The command reads `context.json` for the file's diff, reads `comments.jsonl` and `filters/`, and writes relocation decisions to `.ocr-runs/<runId>/relocations/<safePathKey>.json`.
-4. If `ocr-relocate-apply` exits non-zero, treat it as a soft failure: continue without relocating this file and mention `OCRP-RELOCATE-080` in the final report.
+4. If `ocr-relocate-apply` exits non-zero, retry the exact same command once. If the second attempt also exits non-zero, treat it as a soft failure: continue without relocating this file and mention `OCRP-RELOCATE-080` in the final report.
 5. If deterministic relocation reports fallback comments, optionally invoke the `ocr-relocate` skill for those comments and apply the returned decisions.
 
 Relocation is deterministic and does not require an LLM call. Failures are soft; aggregate will use original line ranges.
@@ -139,3 +147,5 @@ If `partial == true`, prefix your message with: `⚠️ Some files did not compl
 | OCRP-RELOCATE-080 | `ocr-relocate-apply` failed for a file; aggregate uses original line ranges. |
 | OCRP-RELOCATE-081 | Relocation input references path outside review context. |
 | OCRP-RELOCATE-082 | Relocation decision malformed. |
+| OCRP-RULES-090/091/092/093 | Custom rule file cannot be read, parsed, or validated; surface stderr from `ocr-prepare` and stop. |
+| OCRP-RULES-094 | Effective rule text could not be loaded for a file; continue with an empty rule and mention in final report. |
