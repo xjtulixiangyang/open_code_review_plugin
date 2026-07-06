@@ -19,10 +19,31 @@ test('parseArgs accepts --rule alias and stores rulesPath', () => {
   assert.deepEqual(args.unsupported, []);
 });
 
-test('parseArgs keeps --preview and --dry-run unsupported in this increment', () => {
+test('parseArgs accepts --preview and stores preview flag', () => {
+  const args = parseArgs(['--preview']);
+  assert.equal(args.preview, true);
+  assert.equal(args.dryRun, undefined);
+  assert.deepEqual(args.unsupported, []);
+});
+
+test('parseArgs accepts -p as preview alias', () => {
+  const args = parseArgs(['-p']);
+  assert.equal(args.preview, true);
+  assert.deepEqual(args.unsupported, []);
+});
+
+test('parseArgs accepts --dry-run and stores dryRun flag', () => {
+  const args = parseArgs(['--dry-run']);
+  assert.equal(args.dryRun, true);
+  assert.equal(args.preview, undefined);
+  assert.deepEqual(args.unsupported, []);
+});
+
+test('parseArgs accepts preview and dry-run together', () => {
   const args = parseArgs(['--preview', '--dry-run']);
-  assert.ok(args.unsupported.some((x) => x.includes('--preview')));
-  assert.ok(args.unsupported.some((x) => x.includes('--dry-run')));
+  assert.equal(args.preview, true);
+  assert.equal(args.dryRun, true);
+  assert.deepEqual(args.unsupported, []);
 });
 
 test('normalizeConcurrency defaults to 2', () => {

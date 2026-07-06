@@ -76,6 +76,8 @@ export async function buildReviewContext(req: ReviewRequest): Promise<ReviewCont
     changeFiles: files.map((f) => f.path),
     rulesSource: customRules.source,
     excludedFiles,
+    preview: req.preview === true,
+    dryRun: req.dryRun === true,
     meta: { generatedAt: new Date().toISOString(), pluginVersion: PLUGIN_VERSION },
   };
 }

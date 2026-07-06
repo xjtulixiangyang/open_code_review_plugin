@@ -140,3 +140,25 @@ test('buildReviewContext falls back to system rule when no custom rule matches',
     await rm(repo, { recursive: true, force: true });
   }
 });
+
+test('buildReviewContext persists preview flag', async () => {
+  const repo = await mkGitRepo();
+  try {
+    const ctx = await buildReviewContext({ repoRoot: repo, mode: 'workspace', preview: true });
+    assert.equal(ctx.preview, true);
+    assert.equal(ctx.dryRun, false);
+  } finally {
+    await rm(repo, { recursive: true, force: true });
+  }
+});
+
+test('buildReviewContext persists dryRun flag', async () => {
+  const repo = await mkGitRepo();
+  try {
+    const ctx = await buildReviewContext({ repoRoot: repo, mode: 'workspace', dryRun: true });
+    assert.equal(ctx.preview, false);
+    assert.equal(ctx.dryRun, true);
+  } finally {
+    await rm(repo, { recursive: true, force: true });
+  }
+});

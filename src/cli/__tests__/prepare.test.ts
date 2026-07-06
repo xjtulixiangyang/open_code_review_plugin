@@ -35,20 +35,18 @@ test('ocr-prepare accepts --rules and stores rulesPath', async () => {
   }
 });
 
-test('ocr-prepare rejects preview and dry-run flags in P0', async () => {
+test('ocr-prepare accepts preview and dry-run flags', async () => {
   const repo = await mkdtemp(join(tmpdir(), 'ocrp-prepare-'));
   try {
+    await execFileAsync('git', ['init'], { cwd: repo });
+    await execFileAsync('git', ['config', 'user.email', 'test@test'], { cwd: repo });
+    await execFileAsync('git', ['config', 'user.name', 'Test'], { cwd: repo });
+    await execFileAsync('git', ['commit', '--allow-empty', '-m', 'init'], { cwd: repo });
+    await writeFile(join(repo, 'custom.json'), JSON.stringify({ rules: [] }));
     for (const flag of ['--preview', '-p', '--dry-run']) {
-      await assert.rejects(
-        runPrepare(repo, [flag]),
-        (err: unknown) => {
-          const e = err as { code?: number; stderr?: string };
-          assert.equal(e.code, 2);
-          assert.match(e.stderr ?? '', /OCRP-RUN-011/);
-          assert.match(e.stderr ?? '', /planned for P1/);
-          return true;
-        },
-      );
+      const { stdout } = await runPrepare(repo, [flag]);
+      const summary = JSON.parse(stdout);
+      assert.ok(summary.runId);
     }
   } finally {
     await rm(repo, { recursive: true, force: true });
