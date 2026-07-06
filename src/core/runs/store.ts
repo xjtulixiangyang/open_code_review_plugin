@@ -1,5 +1,5 @@
 import { mkdir, writeFile, readFile, readdir, open, stat } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { dirname, join, sep } from 'node:path';
 import type { FilterFileResult, ReadFilterResultsOutput } from '../model/filter.js';
 import type { RelocationFileResult, ReadRelocationResultsOutput } from '../model/relocation.js';
 
@@ -41,6 +41,14 @@ function worktreeParentRunDir(runId: string): string | null {
   return join(repoRoot, '.ocr-runs', runId);
 }
 
+function containingRunDir(runId: string): string | null {
+  const cwd = process.cwd();
+  const suffix = `${sep}.ocr-runs${sep}${runId}`;
+  const idx = cwd.lastIndexOf(suffix);
+  if (idx === -1) return null;
+  return cwd.slice(0, idx + suffix.length);
+}
+
 async function fileExists(p: string): Promise<boolean> {
   try {
     await stat(p);
@@ -57,6 +65,8 @@ export function runDir(runId: string): string {
 }
 
 async function resolveRunDir(runId: string): Promise<string> {
+  const containing = containingRunDir(runId);
+  if (containing && await fileExists(join(containing, 'context.json'))) return containing;
   const current = runDir(runId);
   const contextPath = join(current, 'context.json');
   if (await fileExists(contextPath)) return current;
