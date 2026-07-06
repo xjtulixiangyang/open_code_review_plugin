@@ -45,9 +45,33 @@ if [ ! -f ".ocr-runs/$RUNID/context.json" ]; then
   exit 1
 fi
 
-# --- Test 2: line relocation via ocr-relocate-apply ---
+# --- Test 2: preview mode ---
 echo ""
-echo "=== Test 2: line relocation ==="
+echo "=== Test 2: preview mode ==="
+preview_summary="$($PLUGIN_ROOT/bin/ocr-prepare --preview)"
+echo "[smoke] preview summary: $preview_summary"
+node -e 'const summary = JSON.parse(process.argv[1]);
+if (summary.preview !== true) {
+  console.error("FAIL: preview summary did not set preview=true");
+  process.exit(1);
+}
+if (summary.dryRun !== false) {
+  console.error("FAIL: preview summary did not set dryRun=false");
+  process.exit(1);
+}
+if (typeof summary.rulesSource !== "string") {
+  console.error("FAIL: preview summary missing rulesSource");
+  process.exit(1);
+}
+if (typeof summary.excludedFileCount !== "number") {
+  console.error("FAIL: preview summary missing excludedFileCount");
+  process.exit(1);
+}
+console.log("PASS: preview summary contains preview metadata");' "$preview_summary"
+
+# --- Test 3: line relocation via ocr-relocate-apply ---
+echo ""
+echo "=== Test 3: line relocation ==="
 
 # Create a comment with existing_code but wrong line number (99 instead of 1)
 COMMENT_RELOCATE="$($PLUGIN_ROOT/bin/code_comment --runId "$RUNID" --args '{"path":"a.ts","subagent":"reviewer-b","comments":[{"start_line":99,"end_line":99,"content":"Use const","existing_code":"export function hello() {"}]}')"

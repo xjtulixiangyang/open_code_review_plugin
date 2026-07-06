@@ -89,7 +89,7 @@ export function resolveRule(
   for (const entry of custom.rules) {
     if (globToRegExp(entry.path).test(filePath)) {
       return {
-        ruleId: `custom:${filePath}`,
+        ruleId: `custom:${entry.path}`,
         text: entry.rule,
         source: 'custom',
       };

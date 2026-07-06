@@ -22,10 +22,40 @@ Run Bash:
 ocr-prepare $ARGUMENTS
 ```
 
-Capture the stdout JSON. It contains `runId`, `fileCount`, `hunkCount`, `changedLines`, `contextPath`, and `concurrency`. If `concurrency` is absent because an older build produced the summary, use `2`.
+Capture the stdout JSON. It contains `runId`, `fileCount`, `hunkCount`, `changedLines`, `contextPath`, `concurrency`, `preview`, `dryRun`, `rulesSource`, and `excludedFileCount`. If `concurrency` is absent because an older build produced the summary, use `2`.
 
 If `fileCount` is 0 → tell the user "No changes to review." and stop. This is a successful skipped review, not a hard failure.
 If the command exits non-zero → surface the stderr to the user and stop.
+
+If `preview == true` or `dryRun == true`:
+
+1. Read `.ocr-runs/<runId>/context.json`.
+2. Reply with a preview summary and then stop. Do not run Step 2, Step 3, Step 3.5, Step 3.6, or Step 4.
+3. Use this exact structure:
+
+   ```md
+   ## Review Preview
+
+   **Run**: `<runId>`  
+   **Range**: `<context.range>`  
+   **Mode**: `` `preview` `` when only preview is true, `` `dry-run` `` when only dryRun is true, or `` `preview + dry-run` `` when both are true.  
+   **Rules source**: `<context.rulesSource || summary.rulesSource || "system">`  
+   **Concurrency**: `<summary.concurrency || 2>`
+
+   ### Files to review (<context.files.length>)
+
+   | File | Status | Hunks | Changed lines | Rule |
+   |---|---:|---:|---:|---|
+   | `<file.path>` | `<file.status>` | `<file.hunks.length>` | `<sum of hunk lines where kind != " ">` | `<file.rulesHit[0].ruleId || "">` |
+
+   ### Excluded files (<context.excludedFiles.length>)
+
+   | File | Reason |
+   |---|---|
+   | `<excluded.path>` | `<excluded.reason>` |
+   ```
+
+4. If there are no excluded files, write `None` below the `Excluded files` heading instead of a table.
 
 ### Step 2 — Plan (only when changedLines >= 50)
 
@@ -136,7 +166,7 @@ If `partial == true`, prefix your message with: `⚠️ Some files did not compl
 |---|---|
 | OCRP-LOAD-002 | "Plugin not built — please run `npm run build` in the plugin directory." |
 | OCRP-RUN-010 | "Not a git repository at `<cwd>`. Run `/review` inside a git repo." |
-| OCRP-RUN-011 | "Argument conflict or unsupported P0 flag: <message>. Use only one review target and avoid P1 flags such as --preview/--dry-run." |
+| OCRP-RUN-011 | "Argument conflict or unsupported flag: <message>. Use only one review target." |
 | OCRP-RUN-012 | "No changes to review." (exit 0) |
 | OCRP-SKILL-040 | Continue without plan_guidance; mention in the final report. |
 | OCRP-SUB-050/051 | Already surfaced by `ocr-aggregate` as partial. |

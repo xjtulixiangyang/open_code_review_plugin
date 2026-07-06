@@ -48,8 +48,11 @@ Inside Claude Code:
 | `--paths "g1,g2"` | include/path filter | — | Limits changed files before review |
 | `--concurrency <n>` | same | 2 | Controls how many file reviewer subagents are dispatched at once. Default is `2` for stability. Values above `8` are capped to `8`. |
 | `--format markdown|json|both` | `--format` | both | Controls aggregate artifacts |
+| `--preview`, `-p` | same | false | Show review preview without running review. Does not call PLAN, reviewer, filter, relocate, or aggregate. |
+| `--dry-run` | same | false | Same as --preview. Sets `dryRun: true` in the review context for future tooling integration. |
+`--preview`, `-p`, and `--dry-run` run deterministic prepare only. They show the review range, files that would be reviewed, excluded files, matched rule IDs, rules source, and concurrency. Preview/dry-run mode does not call the PLAN skill, reviewer subagents, filter, relocate, or aggregate, and it does not generate formal `report.md` / `report.json` artifacts.
 
-P1 planned flags `--preview` / `-p` and `--dry-run` are parsed defensively but rejected in P0 with `OCRP-RUN-011`. The `--rules` / `--rule` flag is now fully supported (see Configuration).
+The `--rules` / `--rule` flag is now fully supported (see Configuration).
 
 ## 4. Architecture
 
@@ -120,7 +123,7 @@ rules:
 |---|---|---|
 | `OCRP-LOAD-002` | `dist/` missing | `npm run build` |
 | `OCRP-RUN-010` | Not in a git repo | `cd` to a repo root |
-| `OCRP-RUN-011` | Argument conflict or unsupported P0 flag | Use only one review target and avoid P1 flags such as --preview/--dry-run |
+| `OCRP-RUN-011` | Argument conflict or unsupported flag | Use only one review target |
 | `OCRP-RUN-012` | No changes | Stage something or pick a non-trivial range |
 | `OCRP-SKILL-040` | PLAN output unparseable | Already downgraded; main review still runs |
 | `OCRP-SUB-050/051` | Some subagents did not finish | Report flagged `partial: true` |

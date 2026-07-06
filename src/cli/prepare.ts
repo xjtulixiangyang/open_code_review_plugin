@@ -18,6 +18,8 @@ export interface ParsedArgs {
   format?: 'markdown' | 'json' | 'both';
   concurrency?: number;
   unsupported: string[];
+  preview?: boolean;
+  dryRun?: boolean;
 }
 
 export function parseArgs(argv: string[]): ParsedArgs {
@@ -48,9 +50,9 @@ export function parseArgs(argv: string[]): ParsedArgs {
     } else if (a === '--format' || a === '-f') out.format = next() as ParsedArgs['format'];
     else if (a === '--concurrency') out.concurrency = parseInt(next(), 10);
     else if (a === '--dry-run') {
-      out.unsupported.push('--dry-run is planned for P1 preview mode');
+      out.dryRun = true;
     } else if (a === '--preview' || a === '-p') {
-      out.unsupported.push(`${a} is planned for P1 preview mode`);
+      out.preview = true;
     } else if (!a.startsWith('-')) {
       // 位置参数便捷形式
       if (a === 'staged') out.mode = 'staged';
@@ -97,6 +99,8 @@ async function main(): Promise<void> {
     rulesPath: args.rulesPath,
     format: args.format,
     concurrency,
+    preview: args.preview,
+    dryRun: args.dryRun,
   };
   const ctx = await buildReviewContext(req);
   await writeContext(ctx.runId, ctx);
@@ -109,6 +113,10 @@ async function main(): Promise<void> {
       0,
     ),
     concurrency,
+    preview: ctx.preview === true,
+    dryRun: ctx.dryRun === true,
+    rulesSource: ctx.rulesSource ?? 'system',
+    excludedFileCount: ctx.excludedFiles?.length ?? 0,
     contextPath: `.ocr-runs/${ctx.runId}/context.json`,
   };
   process.stdout.write(JSON.stringify(summary, null, 2) + '\n');
