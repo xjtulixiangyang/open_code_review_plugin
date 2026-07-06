@@ -11,19 +11,26 @@
   "files": [
     ".claude-plugin",
     "commands",
+    "agents",
     "skills",
+    "hooks",
+    "bin",
+    "assets",
     "dist",
     "README.md",
     "LICENSE"
   ],
   "scripts": {
-    "clean": "rm -rf dist",
+    "clean": "rm -rf dist bin/[^.]* 2>/dev/null || true",
     "build:tsc": "tsc -p tsconfig.json",
+    "build:assets": "node scripts/copy-assets.mjs",
     "build:mjs": "node scripts/build-mjs.mjs",
-    "build": "npm run clean && npm run build:tsc && npm run build:mjs",
+    "build:bin": "node scripts/shebang.mjs",
+    "build": "npm run clean && npm run build:tsc && npm run build:assets && npm run build:mjs && npm run build:bin",
     "typecheck": "tsc --noEmit",
     "test": "node --import tsx --test src/**/__tests__/*.test.ts",
-    "preview": "ls -la dist/"
+    "smoke": "bash scripts/smoke.sh",
+    "preview": "ls -la dist/ bin/"
   },
   "keywords": [
     "claude-code",
