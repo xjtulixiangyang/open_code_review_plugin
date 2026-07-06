@@ -32,6 +32,9 @@ export interface FileChange {
   truncated: boolean;
   hunks: Hunk[];
   rulesHit: RuleHit[];
+  skipped?: boolean;
+  skipReason?: string;
+  skippedLines?: number;
 }
 
 export interface ReviewRequest {
@@ -45,6 +48,7 @@ export interface ReviewRequest {
   rulesPath?: string;
   preview?: boolean;
   dryRun?: boolean;
+  resumeRunId?: string;
   format?: 'markdown' | 'json' | 'both';
   concurrency?: number;
   maxHunkLines?: number;
@@ -61,6 +65,8 @@ export interface ReviewContext {
   excludedFiles?: Array<{ path: string; reason: string }>;
   preview?: boolean;
   dryRun?: boolean;
+  resumed?: boolean;
+  remainingFileCount?: number;
   meta: {
     generatedAt: string;
     pluginVersion: string;

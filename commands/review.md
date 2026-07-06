@@ -22,7 +22,7 @@ Run Bash:
 ocr-prepare $ARGUMENTS
 ```
 
-Capture the stdout JSON. It contains `runId`, `fileCount`, `hunkCount`, `changedLines`, `contextPath`, `concurrency`, `preview`, `dryRun`, `rulesSource`, and `excludedFileCount`. If `concurrency` is absent because an older build produced the summary, use `2`.
+Capture the stdout JSON. It contains `runId`, `fileCount`, `hunkCount`, `changedLines`, `contextPath`, `concurrency`, `preview`, `dryRun`, `resumed`, `remainingFileCount`, `rulesSource`, and `excludedFileCount`. If `concurrency` is absent because an older build produced the summary, use `2`.
 
 If `fileCount` is 0 → tell the user "No changes to review." and stop. This is a successful skipped review, not a hard failure.
 If the command exits non-zero → surface the stderr to the user and stop.
@@ -77,6 +77,8 @@ Otherwise skip this step.
 Process `context.files[]` in bounded batches. Let `reviewConcurrency = prepareSummary.concurrency || 2`. Dispatch at most `reviewConcurrency` reviewer subagents at the same time. Do not start the next batch until every file in the current batch has either completed review or exhausted its retry attempts.
 
 For each file in a batch:
+
+0. Skip files where `skipped === true`; mention them in the final report under a "Skipped files" section with their path and skipReason. Do not dispatch a reviewer for these files.
 
 1. Compute `planGuidance` deterministically. If `.ocr-runs/<runId>/plan.json` exists, run:
    ```bash
@@ -159,6 +161,16 @@ Read `.ocr-runs/<runId>/report.md` and reply with its full contents inline. Also
 - `<repo>/.ocr-runs/<runId>/filters/` (when any comments were filtered)
 
 If `partial == true`, prefix your message with: `⚠️ Some files did not complete review; see Warnings section.`
+
+### Step 6 — Post to PR (optional)
+
+If the user requests posting review comments to a PR:
+
+1. Run Bash:
+   ```bash
+   ocr-post-comments --runId <runId> --provider <github|gitlab> --pr <number>
+   ```
+2. The stdout JSON contains `posted`, `failed`, and `skipped`. Reply with a summary.
 
 ## Error handling
 

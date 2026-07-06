@@ -4,8 +4,8 @@ import { parseUnifiedDiff } from '../diff/parser.js';
 import { isFileInScope } from '../allowlist/allowed_ext.js';
 import { loadCustomRules } from '../rules/custom_rules.js';
 import { resolveRule } from '../rules/matcher.js';
-import { MAX_HUNK_LINES, PLUGIN_VERSION } from '../prompts/constants.js';
-import { newRunId } from '../runs/store.js';
+import { MAX_HUNK_LINES, MAX_FILE_CHANGED_LINES, PLUGIN_VERSION } from '../prompts/constants.js';
+import { newRunId, listDone } from '../runs/store.js';
 import type { ReviewRequest, ReviewContext, FileChange } from '../model/request.js';
 
 export async function buildReviewContext(req: ReviewRequest): Promise<ReviewContext> {
@@ -54,6 +54,29 @@ export async function buildReviewContext(req: ReviewRequest): Promise<ReviewCont
   }
   files = scopedFiles;
 
+  // Resume logic: filter out already-done files
+  if (req.resumeRunId) {
+    const doneItems = await listDone(req.resumeRunId);
+    const donePaths = new Set(doneItems.map((d) => d.file));
+    const remainingFiles: FileChange[] = [];
+    for (const f of files) {
+      if (!donePaths.has(f.path)) {
+        remainingFiles.push(f);
+      }
+    }
+    files = remainingFiles;
+  }
+
+  // Large diff guard: skip files with too many changed lines
+  for (const f of files) {
+    const changed = f.hunks.reduce((s, h) => s + h.lines.filter(l => l.kind !== ' ').length, 0);
+    if (changed > MAX_FILE_CHANGED_LINES) {
+      f.skipped = true;
+      f.skipReason = `file too large (${changed} changed lines > ${MAX_FILE_CHANGED_LINES} threshold)`;
+      f.skippedLines = changed;
+    }
+  }
+
   // Resolve rules for each file (custom first, system fallback)
   for (const f of files) {
     const rule = resolveRule(f.path, customRules);
@@ -67,6 +90,15 @@ export async function buildReviewContext(req: ReviewRequest): Promise<ReviewCont
   }
 
   const runId = newRunId();
+
+  // Load previous context for resume metadata
+  let resumed: boolean | undefined;
+  let remainingFileCount: number | undefined;
+  if (req.resumeRunId) {
+    resumed = true;
+    remainingFileCount = files.length;
+  }
+
   return {
     runId,
     repoRoot,
@@ -78,6 +110,8 @@ export async function buildReviewContext(req: ReviewRequest): Promise<ReviewCont
     excludedFiles,
     preview: req.preview === true,
     dryRun: req.dryRun === true,
+    resumed,
+    remainingFileCount,
     meta: { generatedAt: new Date().toISOString(), pluginVersion: PLUGIN_VERSION },
   };
 }
