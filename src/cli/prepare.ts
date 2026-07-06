@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { buildReviewContext } from '../core/context/review_context.js';
 import { writeContext } from '../core/runs/store.js';
+import { MAX_FILES_PER_RUN } from '../core/prompts/constants.js';
 import type { ReviewRequest } from '../core/model/request.js';
 import type { ReviewMode } from '../core/types.js';
 
@@ -124,6 +125,7 @@ async function main(): Promise<void> {
     remainingFileCount: ctx.remainingFileCount ?? ctx.files.length,
     rulesSource: ctx.rulesSource ?? 'system',
     excludedFileCount: ctx.excludedFiles?.length ?? 0,
+    fileCountWarning: ctx.files.length > MAX_FILES_PER_RUN,
     contextPath: `.ocr-runs/${ctx.runId}/context.json`,
   };
   process.stdout.write(JSON.stringify(summary, null, 2) + '\n');
