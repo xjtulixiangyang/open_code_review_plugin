@@ -32,6 +32,9 @@ export interface FileChange {
   truncated: boolean;
   hunks: Hunk[];
   rulesHit: RuleHit[];
+  skipped?: boolean;
+  skipReason?: string;
+  skippedLines?: number;
 }
 
 export interface ReviewRequest {

@@ -4,7 +4,7 @@ import { parseUnifiedDiff } from '../diff/parser.js';
 import { isFileInScope } from '../allowlist/allowed_ext.js';
 import { loadCustomRules } from '../rules/custom_rules.js';
 import { resolveRule } from '../rules/matcher.js';
-import { MAX_HUNK_LINES, PLUGIN_VERSION } from '../prompts/constants.js';
+import { MAX_HUNK_LINES, MAX_FILE_CHANGED_LINES, PLUGIN_VERSION } from '../prompts/constants.js';
 import { newRunId, listDone, readContext } from '../runs/store.js';
 import type { ReviewRequest, ReviewContext, FileChange } from '../model/request.js';
 
@@ -65,6 +65,16 @@ export async function buildReviewContext(req: ReviewRequest): Promise<ReviewCont
       }
     }
     files = remainingFiles;
+  }
+
+  // Large diff guard: skip files with too many changed lines
+  for (const f of files) {
+    const changed = f.hunks.reduce((s, h) => s + h.lines.filter(l => l.kind !== ' ').length, 0);
+    if (changed > MAX_FILE_CHANGED_LINES) {
+      f.skipped = true;
+      f.skipReason = `file too large (${changed} changed lines > ${MAX_FILE_CHANGED_LINES} threshold)`;
+      f.skippedLines = changed;
+    }
   }
 
   // Resolve rules for each file (custom first, system fallback)

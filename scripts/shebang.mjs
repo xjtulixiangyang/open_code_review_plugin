@@ -2,9 +2,11 @@
 /**
  * shebang.mjs - 给 dist/cli/*.mjs 加 shebang + chmod +x，并同步到 bin/。
  * bin/<name> 优先做软链 → dist/cli/<name>.mjs；软链失败时回退为复制。
+ * Windows .cmd wrappers are also generated for compatibility.
  */
 
 import { readdir, readFile, writeFile, chmod, symlink, copyFile, unlink, mkdir } from 'node:fs/promises';
+import { writeFileSync, chmodSync } from 'node:fs';
 import { join, dirname, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -14,6 +16,28 @@ const cliDir = join(root, 'dist', 'cli');
 const binDir = join(root, 'bin');
 
 const SHEBANG = '#!/usr/bin/env node\n';
+
+const stemToBinName = {
+  prepare: 'ocr-prepare',
+  aggregate: 'ocr-aggregate',
+  rules_check: 'ocr-rules-check',
+  plan_guidance: 'ocr-plan-guidance',
+  filter_apply: 'ocr-filter-apply',
+  relocate_apply: 'ocr-relocate-apply',
+};
+
+// Map bin names to their .mjs stem for Windows .cmd wrappers
+const binToMjsStem = {
+  'ocr-prepare': 'prepare',
+  'ocr-aggregate': 'aggregate',
+  'ocr-rules-check': 'rules_check',
+  'ocr-plan-guidance': 'plan_guidance',
+  'ocr-filter-apply': 'filter_apply',
+  'ocr-relocate-apply': 'relocate_apply',
+  'code_comment': 'code_comment',
+  'task_done': 'task_done',
+  'file_read_diff': 'file_read_diff',
+};
 
 async function main() {
   await mkdir(binDir, { recursive: true });
@@ -41,15 +65,7 @@ async function main() {
     await chmod(full, 0o755);
 
     const stem = basename(f, '.mjs');
-    const map = {
-      prepare: 'ocr-prepare',
-      aggregate: 'ocr-aggregate',
-      rules_check: 'ocr-rules-check',
-      plan_guidance: 'ocr-plan-guidance',
-      filter_apply: 'ocr-filter-apply',
-      relocate_apply: 'ocr-relocate-apply',
-    };
-    const binName = map[stem] ?? stem;
+    const binName = stemToBinName[stem] ?? stem;
     const target = join(binDir, binName);
 
     try { await unlink(target); } catch { /* not exist */ }
@@ -65,6 +81,14 @@ async function main() {
     count++;
   }
   console.log(`[shebang] done. processed ${count} file(s).`);
+
+  // Windows .cmd wrappers
+  for (const [name, mjsName] of Object.entries(binToMjsStem)) {
+    const cmdPath = join(binDir, `${name}.cmd`);
+    writeFileSync(cmdPath, `@echo off\r\nnode "%~dp0..\\dist\\cli\\${mjsName}.mjs" %*\r\n`);
+    chmodSync(cmdPath, 0o755);
+    console.log(`[shebang] ${name}.cmd -> dist/cli/${mjsName}.mjs`);
+  }
 }
 
 main().catch((err) => {
