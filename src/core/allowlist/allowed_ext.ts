@@ -85,37 +85,43 @@ export function isAllowed(path: string, extraExclude: string[] = []): boolean {
   return true;
 }
 
+export type FileScopeReason =
+  | 'unsupported-ext'
+  | 'user-exclude'
+  | 'user-include'
+  | 'default-exclude'
+  | 'ok';
+
 export interface FileScopeResult {
   allowed: boolean;
-  reason: string;
+  reason: FileScopeReason;
 }
 
 /**
- * Check if a file is in scope based on custom include/exclude patterns.
- * Falls back to isAllowed() when no custom patterns are defined.
+ * Combined file scope check with custom include/exclude and supported-extension gate.
  */
 export function isFileInScope(
   filePath: string,
   custom: { include: string[]; exclude: string[] },
 ): FileScopeResult {
-  // When custom include is specified, file must match at least one include pattern
-  if (custom.include.length > 0) {
-    if (!matchAny(filePath, custom.include)) {
-      return { allowed: false, reason: 'user-include' };
-    }
-  }
+  const ext = extname(filePath);
+  const exts = loadSupportedExtensions();
+  if (!exts.includes(ext)) return { allowed: false, reason: 'unsupported-ext' };
 
-  // Custom exclude always applies
   if (custom.exclude.length > 0 && matchAny(filePath, custom.exclude)) {
     return { allowed: false, reason: 'user-exclude' };
   }
 
-  // If no custom include/exclude, fall back to default allowlist
-  if (custom.include.length === 0 && custom.exclude.length === 0) {
-    if (!isAllowed(filePath)) {
-      return { allowed: false, reason: 'default-exclude' };
+  if (custom.include.length > 0) {
+    if (!matchAny(filePath, custom.include)) {
+      return { allowed: false, reason: 'user-include' };
     }
+    return { allowed: true, reason: 'ok' };
   }
 
-  return { allowed: true, reason: '' };
+  if (matchAny(filePath, loadDefaultExcludes())) {
+    return { allowed: false, reason: 'default-exclude' };
+  }
+
+  return { allowed: true, reason: 'ok' };
 }

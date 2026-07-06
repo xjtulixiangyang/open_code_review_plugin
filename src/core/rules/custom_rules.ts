@@ -1,7 +1,6 @@
-import { readFile } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
 import { join, isAbsolute } from 'node:path';
 import { homedir } from 'node:os';
-import { stat } from 'node:fs/promises';
 import YAML from 'yaml';
 
 export interface CustomRuleEntry {
