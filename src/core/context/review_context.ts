@@ -5,7 +5,7 @@ import { isFileInScope } from '../allowlist/allowed_ext.js';
 import { loadCustomRules } from '../rules/custom_rules.js';
 import { resolveRule } from '../rules/matcher.js';
 import { MAX_HUNK_LINES, MAX_FILE_CHANGED_LINES, PLUGIN_VERSION } from '../prompts/constants.js';
-import { newRunId, listDone, readContext } from '../runs/store.js';
+import { newRunId, listDone } from '../runs/store.js';
 import type { ReviewRequest, ReviewContext, FileChange } from '../model/request.js';
 
 export async function buildReviewContext(req: ReviewRequest): Promise<ReviewContext> {

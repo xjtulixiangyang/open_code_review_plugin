@@ -19,6 +19,7 @@ function exec(cmd: string, args: string[]): Promise<{ ok: boolean; stderr: strin
   return new Promise((resolve) => {
     const p = spawn(cmd, args, { stdio: ['ignore', 'pipe', 'pipe'] });
     let stderr = '';
+    p.stdout.resume(); // drain stdout to prevent pipe buffer from blocking
     p.stderr.on('data', (d) => (stderr += d.toString()));
     p.on('close', (code) => resolve({ ok: code === 0, stderr }));
     p.on('error', (e) => resolve({ ok: false, stderr: e.message }));
@@ -58,10 +59,19 @@ async function main(): Promise<void> {
         process.stderr.write('[ocr-post-comments] --pr required for gitlab\n');
         process.exit(2);
       }
-      const token = process.env.GITLAB_TOKEN || '';
+      const token = process.env.GITLAB_TOKEN;
+      if (!token) {
+        process.stderr.write('[ocr-post-comments] GITLAB_TOKEN env var required for gitlab provider\n');
+        process.exit(2);
+      }
+      const projectId = process.env.CI_PROJECT_ID;
+      if (!projectId) {
+        process.stderr.write('[ocr-post-comments] CI_PROJECT_ID env var required for gitlab provider\n');
+        process.exit(2);
+      }
       result = await exec('curl', [
         '--request', 'POST',
-        `https://gitlab.com/api/v4/projects/${process.env.CI_PROJECT_ID || '0'}/merge_requests/${pr}/notes`,
+        `https://gitlab.com/api/v4/projects/${projectId}/merge_requests/${pr}/notes`,
         '--header', `PRIVATE-TOKEN: ${token}`,
         '--data-urlencode', `body=${body}`,
       ]);
