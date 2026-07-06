@@ -78,6 +78,8 @@ Process `context.files[]` in bounded batches. Let `reviewConcurrency = prepareSu
 
 For each file in a batch:
 
+0. Skip files where `skipped === true`; mention them in the final report under a "Skipped files" section with their path and skipReason. Do not dispatch a reviewer for these files.
+
 1. Compute `planGuidance` deterministically. If `.ocr-runs/<runId>/plan.json` exists, run:
    ```bash
    ocr-plan-guidance --runId <runId> --path <currentFilePath>
