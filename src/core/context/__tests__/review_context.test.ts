@@ -162,3 +162,41 @@ test('buildReviewContext persists dryRun flag', async () => {
     await rm(repo, { recursive: true, force: true });
   }
 });
+
+test('buildReviewContext with resumeRunId filters done files', async () => {
+  const repo = await mkGitRepo();
+  try {
+    // Create a prior run context
+    // writeContext, markDone, listDone imported statically
+    const priorRunId = '20260707-120000-test';
+    const priorCtx = {
+      runId: priorRunId,
+      repoRoot: repo,
+      range: 'workspace',
+      background: '',
+      files: [
+        { path: 'src/keep.ts', status: 'modified', diff: '', truncated: false, hunks: [], rulesHit: [] },
+        { path: 'src/skip.ts', status: 'modified', diff: '', truncated: false, hunks: [], rulesHit: [] },
+      ],
+      changeFiles: ['src/keep.ts', 'src/skip.ts'],
+      meta: { generatedAt: new Date().toISOString(), pluginVersion: '0.0.0' },
+    };
+    await writeContext(priorRunId, priorCtx);
+    // Mark src/skip.ts as done
+    await markDone(priorRunId, 'reviewer-0', 'src/skip.ts');
+
+    const ctx = await buildReviewContext({
+      repoRoot: repo,
+      mode: 'workspace',
+      resumeRunId: priorRunId,
+    });
+
+    assert.equal(ctx.resumed, true);
+    assert.ok(ctx.remainingFileCount !== undefined);
+    // Only src/keep.ts should remain (src/skip.ts is done)
+    assert.ok(ctx.changeFiles.includes('src/keep.ts'));
+    assert.ok(!ctx.changeFiles.includes('src/skip.ts'));
+  } finally {
+    await rm(repo, { recursive: true, force: true });
+  }
+});

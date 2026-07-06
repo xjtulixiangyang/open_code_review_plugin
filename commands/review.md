@@ -22,7 +22,7 @@ Run Bash:
 ocr-prepare $ARGUMENTS
 ```
 
-Capture the stdout JSON. It contains `runId`, `fileCount`, `hunkCount`, `changedLines`, `contextPath`, `concurrency`, `preview`, `dryRun`, `rulesSource`, and `excludedFileCount`. If `concurrency` is absent because an older build produced the summary, use `2`.
+Capture the stdout JSON. It contains `runId`, `fileCount`, `hunkCount`, `changedLines`, `contextPath`, `concurrency`, `preview`, `dryRun`, `resumed`, `remainingFileCount`, `rulesSource`, and `excludedFileCount`. If `concurrency` is absent because an older build produced the summary, use `2`.
 
 If `fileCount` is 0 → tell the user "No changes to review." and stop. This is a successful skipped review, not a hard failure.
 If the command exits non-zero → surface the stderr to the user and stop.

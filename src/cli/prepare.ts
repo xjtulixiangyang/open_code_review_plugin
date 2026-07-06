@@ -20,6 +20,7 @@ export interface ParsedArgs {
   unsupported: string[];
   preview?: boolean;
   dryRun?: boolean;
+  resumeRunId?: string;
 }
 
 export function parseArgs(argv: string[]): ParsedArgs {
@@ -27,6 +28,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
   //   --staged | --commit <sha> | --from <a> --to <b> | (default: workspace)
   //   --paths <glob1,glob2> | --background "..." | --rules <path>
   //   --format text|json|both | --concurrency <n> | --dry-run | --preview
+  //   --resume <runId>
   // 位置参数：第一个非 flag 视为 "staged" / "HEAD~3" 等便捷形式
   const out: ParsedArgs = { mode: 'workspace', unsupported: [] };
   let i = 0;
@@ -53,6 +55,8 @@ export function parseArgs(argv: string[]): ParsedArgs {
       out.dryRun = true;
     } else if (a === '--preview' || a === '-p') {
       out.preview = true;
+    } else if (a === '--resume') {
+      out.resumeRunId = next();
     } else if (!a.startsWith('-')) {
       // 位置参数便捷形式
       if (a === 'staged') out.mode = 'staged';
@@ -101,6 +105,7 @@ async function main(): Promise<void> {
     concurrency,
     preview: args.preview,
     dryRun: args.dryRun,
+    resumeRunId: args.resumeRunId,
   };
   const ctx = await buildReviewContext(req);
   await writeContext(ctx.runId, ctx);
@@ -115,6 +120,8 @@ async function main(): Promise<void> {
     concurrency,
     preview: ctx.preview === true,
     dryRun: ctx.dryRun === true,
+    resumed: ctx.resumed ?? false,
+    remainingFileCount: ctx.remainingFileCount ?? ctx.files.length,
     rulesSource: ctx.rulesSource ?? 'system',
     excludedFileCount: ctx.excludedFiles?.length ?? 0,
     contextPath: `.ocr-runs/${ctx.runId}/context.json`,

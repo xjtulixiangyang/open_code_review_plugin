@@ -66,3 +66,9 @@ test('normalizeConcurrency rejects zero, negative, and NaN', () => {
 test('normalizeConcurrency caps values above MAX_REVIEW_CONCURRENCY', () => {
   assert.equal(normalizeConcurrency(MAX_REVIEW_CONCURRENCY + 10), MAX_REVIEW_CONCURRENCY);
 });
+
+test('parseArgs accepts --resume and stores resumeRunId', () => {
+  const args = parseArgs(['--resume', 'run-123']);
+  assert.equal(args.resumeRunId, 'run-123');
+  assert.deepEqual(args.unsupported, []);
+});
