@@ -38,7 +38,7 @@ If `preview == true` or `dryRun == true`:
 
    **Run**: `<runId>`  
    **Range**: `<context.range>`  
-   **Mode**: `<preview|dry-run|preview+dry-run>`  
+   **Mode**: `` `preview` `` when only preview is true, `` `dry-run` `` when only dryRun is true, or `` `preview + dry-run` `` when both are true.  
    **Rules source**: `<context.rulesSource || summary.rulesSource || "system">`  
    **Concurrency**: `<summary.concurrency || 2>`
 
@@ -56,6 +56,7 @@ If `preview == true` or `dryRun == true`:
    ```
 
 4. If there are no excluded files, write `None` below the `Excluded files` heading instead of a table.
+
 ### Step 2 — Plan (only when changedLines >= 50)
 
 If `changedLines >= 50`:

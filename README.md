@@ -49,7 +49,7 @@ Inside Claude Code:
 | `--concurrency <n>` | same | 2 | Controls how many file reviewer subagents are dispatched at once. Default is `2` for stability. Values above `8` are capped to `8`. |
 | `--format markdown|json|both` | `--format` | both | Controls aggregate artifacts |
 | `--preview`, `-p` | same | false | Show review preview without running review. Does not call PLAN, reviewer, filter, relocate, or aggregate. |
-| `--dry-run` | same | false | Same as --preview but also logs prepare diagnostics. |
+| `--dry-run` | same | false | Same as --preview. Sets `dryRun: true` in the review context for future tooling integration. |
 `--preview`, `-p`, and `--dry-run` run deterministic prepare only. They show the review range, files that would be reviewed, excluded files, matched rule IDs, rules source, and concurrency. Preview/dry-run mode does not call the PLAN skill, reviewer subagents, filter, relocate, or aggregate, and it does not generate formal `report.md` / `report.json` artifacts.
 
 The `--rules` / `--rule` flag is now fully supported (see Configuration).
