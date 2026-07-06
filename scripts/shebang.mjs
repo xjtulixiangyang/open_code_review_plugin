@@ -24,6 +24,7 @@ const stemToBinName = {
   plan_guidance: 'ocr-plan-guidance',
   filter_apply: 'ocr-filter-apply',
   relocate_apply: 'ocr-relocate-apply',
+  post_comments: 'ocr-post-comments',
 };
 
 // Map bin names to their .mjs stem for Windows .cmd wrappers
@@ -34,6 +35,7 @@ const binToMjsStem = {
   'ocr-plan-guidance': 'plan_guidance',
   'ocr-filter-apply': 'filter_apply',
   'ocr-relocate-apply': 'relocate_apply',
+  'ocr-post-comments': 'post_comments',
   'code_comment': 'code_comment',
   'task_done': 'task_done',
   'file_read_diff': 'file_read_diff',

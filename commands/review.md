@@ -162,6 +162,16 @@ Read `.ocr-runs/<runId>/report.md` and reply with its full contents inline. Also
 
 If `partial == true`, prefix your message with: `⚠️ Some files did not complete review; see Warnings section.`
 
+### Step 6 — Post to PR (optional)
+
+If the user requests posting review comments to a PR:
+
+1. Run Bash:
+   ```bash
+   ocr-post-comments --runId <runId> --provider <github|gitlab> --pr <number>
+   ```
+2. The stdout JSON contains `posted`, `failed`, and `skipped`. Reply with a summary.
+
 ## Error handling
 
 | Error code | What to do |
