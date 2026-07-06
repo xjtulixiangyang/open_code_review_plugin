@@ -113,6 +113,10 @@ async function main(): Promise<void> {
       0,
     ),
     concurrency,
+    preview: ctx.preview === true,
+    dryRun: ctx.dryRun === true,
+    rulesSource: ctx.rulesSource ?? 'system',
+    excludedFileCount: ctx.excludedFiles?.length ?? 0,
     contextPath: `.ocr-runs/${ctx.runId}/context.json`,
   };
   process.stdout.write(JSON.stringify(summary, null, 2) + '\n');
