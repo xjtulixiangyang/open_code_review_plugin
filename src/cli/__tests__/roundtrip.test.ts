@@ -100,6 +100,13 @@ test('CLI tools write comments, done markers, file diffs, and aggregate reports'
     ]);
     assert.match(found.stdout, /src\/a\.ts/);
 
+    const searched = await runCli(dir, 'code_search.ts', [
+      '--runId', 'run1',
+      '--args', JSON.stringify({ search_text: 'export const a' }),
+    ]);
+    assert.match(searched.stdout, /File: src\/a\.ts/);
+    assert.match(searched.stdout, /1\|export const a = 2;/);
+
     const aggregate = await runCli(dir, 'aggregate.ts', ['--runId', 'run1', '--format', 'both']);
     const summary = JSON.parse(aggregate.stdout) as { partial: boolean; partialFiles: string[]; commentCount: number };
 
