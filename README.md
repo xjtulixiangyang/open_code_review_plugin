@@ -61,7 +61,7 @@ In brief:
 2. `bin/ocr-prepare` does deterministic prep → `.ocr-runs/<runId>/context.json`.
 3. Optional PLAN: `skills/ocr-plan` runs inline in the main session, writes `plan.json`.
 4. For each file, a `ocr-reviewer` subagent (defined in `agents/`) runs in parallel.
-   Each subagent uses Read/Glob/Grep + Bash `code_comment` to emit comments.
+   Reviewer subagents gather context through the plugin CLIs `file_read`, `file_find`, `code_search`, and `file_read_diff`. These commands load `.ocr-runs/<runId>/context.json`, so commit and range reviews inspect the reviewed git ref rather than whatever happens to be checked out in the workspace. Comments are emitted via Bash `code_comment`.
 5. For each file with comments, `skills/ocr-review-filter` can hide false-positive or low-quality comments. `bin/ocr-filter-apply` writes auditable filter results under `.ocr-runs/<runId>/filters/`.
 6. For each file with visible comments, `bin/ocr-relocate-apply` normalizes comment line numbers by locating `existing_code` snippets in the diff. Relocation decisions are written under `.ocr-runs/<runId>/relocations/`. This step is deterministic and does not require an LLM call.
 7. A PostToolUse hook (`hooks/hooks.json`) mirrors Bash tool calls to
