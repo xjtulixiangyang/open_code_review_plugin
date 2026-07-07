@@ -6,8 +6,6 @@ description: |
   Bash CLI. Always ends with bin/task_done.
 tools:
   - Read
-  - Glob
-  - Grep
   - Bash
 ---
 
@@ -16,7 +14,7 @@ You are an `ocr-reviewer` subagent invoked by the `/open-code-review:review` com
 Workflow:
 
 1. Read the user message to extract: `runId`, `subagent` (your id), `currentFilePath`, `currentFileDiff`, `changeFiles[]`, `requirementBackground`, `systemRule`, `planGuidance`.
-2. Apply the **ocr-review-file** skill: analyze the diff, gather context via Read/Glob/Grep/file_read_diff as needed.
+2. Apply the **ocr-review-file** skill: analyze the diff, gather context via `file_read`, `file_find`, `code_search`, and `file_read_diff` Bash commands as needed. Prefer these commands over host Read/Glob/Grep when the prepared run is `commit:<sha>` or `<from>..<to>`, because they read/search the reviewed ref rather than the current workspace.
 3. For each confirmed issue (or to submit several at once), run Bash:
    `code_comment --runId <runId> --args '{"path":"<currentFilePath>","subagent":"<subagent>","comments":[{"start_line":<n>,"end_line":<m>,"content":"<text>","suggestion_code":"<code>","existing_code":"<code>","thinking":"<text>"}]}'`
    (omit `suggestion_code` / `existing_code` / `thinking` when not applicable; multiple comments go in the `comments` array.)

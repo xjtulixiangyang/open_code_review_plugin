@@ -18,10 +18,10 @@ Analyze code change content, identify potential risk points, and plan appropriat
 
 ## Tool Descriptions
 
-- **Read**: read a file's content by absolute or repo-relative path.
-- **Glob**: find files by glob pattern (e.g. "src/**/*.ts").
-- **Grep**: search code by regex/text across the repository.
-- **file_read_diff**: read the unified diff of another changed file in the current review.
+- **file_read**: read file content from the prepared review context. Arguments: `{"file_path":"<path>","start_line":1,"end_line":120}`.
+- **file_find**: find files by name in the prepared review context. Arguments: `{"query_name":"<filename-fragment>","case_sensitive":false}`.
+- **code_search**: search code text in the prepared review context. Arguments: `{"search_text":"<literal-or-regex>","case_sensitive":false,"use_perl_regexp":false,"file_patterns":["src/**/*.ts"]}`.
+- **file_read_diff**: read the unified diff of another changed file in the current review. Arguments: `{"path_array":["<path1>","<path2>"]}`.
 
 ## Output Format
 
