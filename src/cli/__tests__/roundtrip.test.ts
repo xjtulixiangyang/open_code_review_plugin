@@ -11,6 +11,11 @@ import type { ReviewContext } from '../../core/model/request.js';
 const execFileAsync = promisify(execFile);
 const ROOT = process.cwd();
 
+async function git(cwd: string, args: string[]): Promise<string> {
+  const { stdout } = await execFileAsync('git', args, { cwd });
+  return stdout.trim();
+}
+
 /** tsx 加载器绝对路径，确保子进程从任意 cwd 都能加载 ts 文件 */
 const TSX_LOADER = join(ROOT, 'node_modules/tsx/dist/loader.mjs');
 
@@ -55,6 +60,12 @@ test('CLI tools write comments, done markers, file diffs, and aggregate reports'
     await mkdir(join(dir, 'src'));
     await writeFile(join(dir, 'src', 'a.ts'), 'export const a = 2;\n');
     await writeFile(join(dir, 'src', 'b.ts'), 'export const b = 2;\n');
+    await git(dir, ['init', '-q']);
+    await git(dir, ['checkout', '-q', '-b', 'main']);
+    await git(dir, ['config', 'user.email', 'test@example.com']);
+    await git(dir, ['config', 'user.name', 'test']);
+    await git(dir, ['add', '.']);
+    await git(dir, ['commit', '-q', '-m', 'init']);
     await writeContext('run1', makeCtx(dir));
     process.chdir(oldCwd);
 
@@ -82,6 +93,12 @@ test('CLI tools write comments, done markers, file diffs, and aggregate reports'
       '--args', JSON.stringify({ file_path: 'src/a.ts', start_line: 1, end_line: 2 }),
     ]);
     assert.match(read.stdout, /File: src\/a\.ts/);
+
+    const found = await runCli(dir, 'file_find.ts', [
+      '--runId', 'run1',
+      '--args', JSON.stringify({ query_name: 'a.ts' }),
+    ]);
+    assert.match(found.stdout, /src\/a\.ts/);
 
     const aggregate = await runCli(dir, 'aggregate.ts', ['--runId', 'run1', '--format', 'both']);
     const summary = JSON.parse(aggregate.stdout) as { partial: boolean; partialFiles: string[]; commentCount: number };
