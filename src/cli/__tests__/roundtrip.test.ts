@@ -1,4 +1,4 @@
-import { mkdtemp, rm, readFile } from 'node:fs/promises';
+import { mkdtemp, rm, readFile, mkdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFile } from 'node:child_process';
@@ -18,39 +18,44 @@ async function runCli(cwd: string, file: string, args: string[]) {
   return execFileAsync('node', ['--import', TSX_LOADER, join(ROOT, 'src/cli', file), ...args], { cwd });
 }
 
-const CTX: ReviewContext = {
-  runId: 'run1',
-  repoRoot: '/repo',
-  range: 'workspace',
-  background: '',
-  files: [
-    {
-      path: 'src/a.ts',
-      status: 'modified',
-      diff: 'diff --git a/src/a.ts b/src/a.ts\n@@ -1 +1 @@\n-export const a = 1;\n+export const a = 2;\n',
-      truncated: false,
-      hunks: [],
-      rulesHit: [],
-    },
-    {
-      path: 'src/b.ts',
-      status: 'modified',
-      diff: 'diff --git a/src/b.ts b/src/b.ts\n@@ -1 +1 @@\n-export const b = 1;\n+export const b = 2;\n',
-      truncated: false,
-      hunks: [],
-      rulesHit: [],
-    },
-  ],
-  changeFiles: ['src/a.ts', 'src/b.ts'],
-  meta: { generatedAt: 'now', pluginVersion: '0.1.0' },
-};
+function makeCtx(repoRoot: string): ReviewContext {
+  return {
+    runId: 'run1',
+    repoRoot,
+    range: 'workspace',
+    background: '',
+    files: [
+      {
+        path: 'src/a.ts',
+        status: 'modified',
+        diff: 'diff --git a/src/a.ts b/src/a.ts\n@@ -1 +1 @@\n-export const a = 1;\n+export const a = 2;\n',
+        truncated: false,
+        hunks: [],
+        rulesHit: [],
+      },
+      {
+        path: 'src/b.ts',
+        status: 'modified',
+        diff: 'diff --git a/src/b.ts b/src/b.ts\n@@ -1 +1 @@\n-export const b = 1;\n+export const b = 2;\n',
+        truncated: false,
+        hunks: [],
+        rulesHit: [],
+      },
+    ],
+    changeFiles: ['src/a.ts', 'src/b.ts'],
+    meta: { generatedAt: 'now', pluginVersion: '0.1.0' },
+  };
+}
 
 test('CLI tools write comments, done markers, file diffs, and aggregate reports', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'ocrp-roundtrip-'));
   const oldCwd = process.cwd();
   try {
     process.chdir(dir);
-    await writeContext('run1', CTX);
+    await mkdir(join(dir, 'src'));
+    await writeFile(join(dir, 'src', 'a.ts'), 'export const a = 2;\n');
+    await writeFile(join(dir, 'src', 'b.ts'), 'export const b = 2;\n');
+    await writeContext('run1', makeCtx(dir));
     process.chdir(oldCwd);
 
     await runCli(dir, 'code_comment.ts', [
@@ -71,6 +76,12 @@ test('CLI tools write comments, done markers, file diffs, and aggregate reports'
       '--args', JSON.stringify({ path_array: ['src/b.ts'] }),
     ]);
     assert.match(diff.stdout, /==== FILE: src\/b\.ts ====/);
+
+    const read = await runCli(dir, 'file_read.ts', [
+      '--runId', 'run1',
+      '--args', JSON.stringify({ file_path: 'src/a.ts', start_line: 1, end_line: 2 }),
+    ]);
+    assert.match(read.stdout, /File: src\/a\.ts/);
 
     const aggregate = await runCli(dir, 'aggregate.ts', ['--runId', 'run1', '--format', 'both']);
     const summary = JSON.parse(aggregate.stdout) as { partial: boolean; partialFiles: string[]; commentCount: number };
