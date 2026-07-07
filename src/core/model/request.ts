@@ -20,6 +20,8 @@ export interface RuleHit {
   ruleId: string;
   message: string;
   docPath?: string;
+  source?: 'custom' | 'system';
+  text?: string;
 }
 
 export interface FileChange {
@@ -30,6 +32,9 @@ export interface FileChange {
   truncated: boolean;
   hunks: Hunk[];
   rulesHit: RuleHit[];
+  skipped?: boolean;
+  skipReason?: string;
+  skippedLines?: number;
 }
 
 export interface ReviewRequest {
@@ -43,6 +48,7 @@ export interface ReviewRequest {
   rulesPath?: string;
   preview?: boolean;
   dryRun?: boolean;
+  resumeRunId?: string;
   format?: 'markdown' | 'json' | 'both';
   concurrency?: number;
   maxHunkLines?: number;
@@ -55,12 +61,14 @@ export interface ReviewContext {
   background: string;
   files: FileChange[];
   changeFiles: string[];
-  meta: {
-    generatedAt: string;
-    pluginVersion: string;
-  };
   rulesSource?: string;
   excludedFiles?: Array<{ path: string; reason: string }>;
   preview?: boolean;
   dryRun?: boolean;
+  resumed?: boolean;
+  remainingFileCount?: number;
+  meta: {
+    generatedAt: string;
+    pluginVersion: string;
+  };
 }

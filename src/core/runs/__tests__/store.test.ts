@@ -102,6 +102,24 @@ test('run artifacts from a Claude worktree resolve to the parent repo run', asyn
   }
 });
 
+test('run artifacts from inside an existing run directory resolve to that run instead of nesting', async () => {
+  const { dir, restore } = await setupTempRepo();
+  try {
+    const id = newRunId();
+    await writeContext(id, makeContext(id, dir));
+    const rootRunDir = join(dir, '.ocr-runs', id);
+    process.chdir(rootRunDir);
+
+    await markDone(id, 'reviewer-nested', 'src/nested.ts');
+
+    const marker = await readFile(join(rootRunDir, 'done', 'reviewer-nested.json'), 'utf8');
+    assert.match(marker, /"file": "src\/nested.ts"/);
+    await assert.rejects(readFile(join(rootRunDir, '.ocr-runs', id, 'done', 'reviewer-nested.json'), 'utf8'));
+  } finally {
+    restore();
+  }
+});
+
 test('appendComment 串行 N 次 + readComments 顺序保留', async () => {
   const { restore } = await setupTempRepo();
   try {

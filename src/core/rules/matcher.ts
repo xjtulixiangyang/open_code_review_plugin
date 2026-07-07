@@ -70,31 +70,38 @@ export function buildSystemRulePrompt(filePath: string): {
   return { ...m, text: loadRuleDocText(m.docPath) };
 }
 
-export interface RuleResolution {
+export interface ResolvedRule {
   ruleId: string;
-  docPath?: string;
   text: string;
+  docPath?: string;
   source: 'custom' | 'system';
 }
 
 /**
- * 自定义规则优先，first-match-wins；未命中回退内置规则。
- * custom: docPath=undefined, text=rule 文本。
- * system: docPath=内置 doc 名, text=doc 文件内容。
+ * Resolve the applicable rule for a file path.
+ * Checks custom rules first (by path pattern matching); falls back to system rules.
  */
-export function resolveRule(filePath: string, custom: LoadedCustomRules | null): RuleResolution {
-  if (custom && custom.rules.length > 0) {
-    for (const entry of custom.rules) {
-      if (globToRegExp(entry.path).test(filePath)) {
-        return {
-          ruleId: `custom:${entry.path}`,
-          docPath: undefined,
-          text: entry.rule,
-          source: 'custom',
-        };
-      }
+export function resolveRule(
+  filePath: string,
+  custom: LoadedCustomRules,
+): ResolvedRule {
+  // Try custom rules first
+  for (const entry of custom.rules) {
+    if (globToRegExp(entry.path).test(filePath)) {
+      return {
+        ruleId: `custom:${entry.path}`,
+        text: entry.rule,
+        source: 'custom',
+      };
     }
   }
+
+  // Fall back to system rule
   const sys = buildSystemRulePrompt(filePath);
-  return { ruleId: sys.ruleId, docPath: sys.docPath, text: sys.text, source: 'system' };
+  return {
+    ruleId: sys.ruleId,
+    text: sys.text,
+    docPath: sys.docPath,
+    source: 'system',
+  };
 }

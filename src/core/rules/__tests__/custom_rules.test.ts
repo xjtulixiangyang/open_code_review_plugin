@@ -117,3 +117,87 @@ test('loadCustomRules: rule entry missing rule throws OCRP-RULES-093', async () 
     await rm(repo, { recursive: true, force: true });
   }
 });
+
+async function mkHome(): Promise<string> {
+  return mkdtemp(join(tmpdir(), 'ocrp-home-'));
+}
+
+test('loadCustomRules: user ~/.code-review/rules.yaml is used when repo has no config', async () => {
+  const repo = await mkRepo();
+  const home = await mkHome();
+  try {
+    await mkdir(join(home, '.code-review'), { recursive: true });
+    await writeFile(join(home, '.code-review', 'rules.yaml'), 'rules:\n  - path: "src/**"\n    rule: "user rule"\n');
+    const r = await loadCustomRules(repo, undefined, { homeDir: home });
+    assert.equal(r.sourceKind, 'user');
+    assert.equal(r.source, '~/.code-review/rules.yaml');
+    assert.equal(r.rules[0].rule, 'user rule');
+  } finally {
+    await rm(repo, { recursive: true, force: true });
+    await rm(home, { recursive: true, force: true });
+  }
+});
+
+test('loadCustomRules: repo config wins over user config', async () => {
+  const repo = await mkRepo();
+  const home = await mkHome();
+  try {
+    await mkdir(join(home, '.code-review'), { recursive: true });
+    await writeFile(join(home, '.code-review', 'rules.yaml'), 'rules:\n  - path: "**"\n    rule: "user rule"\n');
+    await writeFile(join(repo, '.code-review.yaml'), 'rules:\n  - path: "**"\n    rule: "repo rule"\n');
+    const r = await loadCustomRules(repo, undefined, { homeDir: home });
+    assert.equal(r.sourceKind, 'repo');
+    assert.equal(r.source, '.code-review.yaml');
+    assert.equal(r.rules[0].rule, 'repo rule');
+  } finally {
+    await rm(repo, { recursive: true, force: true });
+    await rm(home, { recursive: true, force: true });
+  }
+});
+
+test('loadCustomRules: CLI path wins over repo and user config', async () => {
+  const repo = await mkRepo();
+  const home = await mkHome();
+  try {
+    await mkdir(join(home, '.code-review'), { recursive: true });
+    await writeFile(join(home, '.code-review', 'rules.yaml'), 'rules:\n  - path: "**"\n    rule: "user rule"\n');
+    await writeFile(join(repo, '.code-review.yaml'), 'rules:\n  - path: "**"\n    rule: "repo rule"\n');
+    await writeFile(join(repo, 'cli.yaml'), 'rules:\n  - path: "**"\n    rule: "cli rule"\n');
+    const r = await loadCustomRules(repo, 'cli.yaml', { homeDir: home });
+    assert.equal(r.sourceKind, 'cli');
+    assert.equal(r.source, 'cli.yaml');
+    assert.equal(r.rules[0].rule, 'cli rule');
+  } finally {
+    await rm(repo, { recursive: true, force: true });
+    await rm(home, { recursive: true, force: true });
+  }
+});
+
+test('loadCustomRules: absolute CLI path is accepted', async () => {
+  const repo = await mkRepo();
+  const other = await mkRepo();
+  try {
+    const abs = join(other, 'external-rules.yaml');
+    await writeFile(abs, 'rules:\n  - path: "**"\n    rule: "absolute cli rule"\n');
+    const r = await loadCustomRules(repo, abs);
+    assert.equal(r.sourceKind, 'cli');
+    assert.equal(r.source, abs);
+    assert.equal(r.rules[0].rule, 'absolute cli rule');
+  } finally {
+    await rm(repo, { recursive: true, force: true });
+    await rm(other, { recursive: true, force: true });
+  }
+});
+
+test('loadCustomRules: user malformed YAML throws OCRP-RULES-091', async () => {
+  const repo = await mkRepo();
+  const home = await mkHome();
+  try {
+    await mkdir(join(home, '.code-review'), { recursive: true });
+    await writeFile(join(home, '.code-review', 'rules.yaml'), 'rules: [unterminated\n');
+    await assert.rejects(loadCustomRules(repo, undefined, { homeDir: home }), /OCRP-RULES-091/);
+  } finally {
+    await rm(repo, { recursive: true, force: true });
+    await rm(home, { recursive: true, force: true });
+  }
+});

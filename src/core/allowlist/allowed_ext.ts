@@ -1,7 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, extname } from 'node:path';
-import type { LoadedCustomRules } from '../rules/custom_rules.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -89,36 +88,33 @@ export function isAllowed(path: string, extraExclude: string[] = []): boolean {
 export type FileScopeReason =
   | 'unsupported-ext'
   | 'user-exclude'
-  | 'not-in-include'
+  | 'user-include'
   | 'default-exclude'
   | 'ok';
 
+export interface FileScopeResult {
+  allowed: boolean;
+  reason: FileScopeReason;
+}
+
 /**
- * 组合判断文件是否进入 review：
- * 1. 扩展名不在 supported list → excluded
- * 2. 命中用户 exclude → excluded
- * 3. 配置了 include 时，未命中 → excluded
- * 4. include 命中 → reviewed (跳过默认 exclude)
- * 5. 无 include 时命中默认 exclude → excluded
- * 6. 否则 reviewed
+ * Combined file scope check with custom include/exclude and supported-extension gate.
  */
 export function isFileInScope(
   filePath: string,
-  custom: LoadedCustomRules | null,
-): { allowed: boolean; reason: FileScopeReason } {
+  custom: { include: string[]; exclude: string[] },
+): FileScopeResult {
   const ext = extname(filePath);
   const exts = loadSupportedExtensions();
   if (!exts.includes(ext)) return { allowed: false, reason: 'unsupported-ext' };
 
-  const exclude = custom?.exclude ?? [];
-  if (exclude.length > 0 && matchAny(filePath, exclude)) {
+  if (custom.exclude.length > 0 && matchAny(filePath, custom.exclude)) {
     return { allowed: false, reason: 'user-exclude' };
   }
 
-  const include = custom?.include ?? [];
-  if (include.length > 0) {
-    if (!matchAny(filePath, include)) {
-      return { allowed: false, reason: 'not-in-include' };
+  if (custom.include.length > 0) {
+    if (!matchAny(filePath, custom.include)) {
+      return { allowed: false, reason: 'user-include' };
     }
     return { allowed: true, reason: 'ok' };
   }

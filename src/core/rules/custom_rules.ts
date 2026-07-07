@@ -1,6 +1,6 @@
-import { readFile } from 'node:fs/promises';
-import { join } from 'node:path';
-import { stat } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
+import { join, isAbsolute } from 'node:path';
+import { homedir } from 'node:os';
 import YAML from 'yaml';
 
 export interface CustomRuleEntry {
@@ -16,13 +16,18 @@ export interface CustomRuleFile {
 
 export interface LoadedCustomRules {
   source: string;
-  sourceKind: 'cli' | 'repo' | 'none';
+  sourceKind: 'cli' | 'repo' | 'user' | 'none';
   rules: CustomRuleEntry[];
   include: string[];
   exclude: string[];
 }
 
+export interface LoadCustomRulesOptions {
+  homeDir?: string;
+}
+
 const REPO_CANDIDATES = ['.code-review.yaml', '.code-review.yml', '.code-review.json'] as const;
+const USER_CANDIDATES = ['rules.yaml', 'rules.yml', 'rules.json'] as const;
 
 function isStringArray(v: unknown): v is string[] {
   return Array.isArray(v) && v.every((x) => typeof x === 'string');
@@ -86,7 +91,11 @@ async function exists(p: string): Promise<boolean> {
   }
 }
 
-async function loadFile(absPath: string, sourceLabel: string, sourceKind: 'cli' | 'repo'): Promise<LoadedCustomRules> {
+async function loadFile(
+  absPath: string,
+  sourceLabel: string,
+  sourceKind: 'cli' | 'repo' | 'user',
+): Promise<LoadedCustomRules> {
   let text: string;
   try {
     text = await readFile(absPath, 'utf8');
@@ -103,16 +112,30 @@ async function loadFile(absPath: string, sourceLabel: string, sourceKind: 'cli' 
   };
 }
 
-export async function loadCustomRules(repoRoot: string, rulesPath?: string): Promise<LoadedCustomRules> {
+export async function loadCustomRules(
+  repoRoot: string,
+  rulesPath?: string,
+  opts: LoadCustomRulesOptions = {},
+): Promise<LoadedCustomRules> {
   if (rulesPath) {
-    const abs = join(repoRoot, rulesPath);
+    const abs = isAbsolute(rulesPath) ? rulesPath : join(repoRoot, rulesPath);
     return loadFile(abs, rulesPath, 'cli');
   }
+
   for (const name of REPO_CANDIDATES) {
     const abs = join(repoRoot, name);
     if (await exists(abs)) {
       return loadFile(abs, name, 'repo');
     }
   }
+
+  const home = opts.homeDir ?? homedir();
+  for (const name of USER_CANDIDATES) {
+    const abs = join(home, '.code-review', name);
+    if (await exists(abs)) {
+      return loadFile(abs, `~/.code-review/${name}`, 'user');
+    }
+  }
+
   return { source: 'system', sourceKind: 'none', rules: [], include: [], exclude: [] };
 }
