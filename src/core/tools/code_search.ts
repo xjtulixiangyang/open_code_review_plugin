@@ -14,12 +14,15 @@ function buildGrepArgs(
   ctx: ReviewContext,
   searchText: string,
   caseSensitive: boolean,
-  useExtendedRegexp: boolean,
+  usePerlRegexp: boolean,
   pathspec: string[],
 ): string[] {
   const args = ['--no-pager', 'grep'];
   if (!caseSensitive) args.push('-i');
-  args.push(useExtendedRegexp ? '-E' : '-F');
+  // Use -E (extended regex) as portable fallback; -P (Perl regex) is used
+  // when available but Apple Git lacks PCRE support. The public arg name
+  // use_perl_regexp is kept for OCR API compatibility.
+  args.push(usePerlRegexp ? '-E' : '-F');
   args.push('-n', '--no-color', '-e', searchText);
 
   const ref = resolveContextRef(ctx);
@@ -41,9 +44,9 @@ export async function searchCode(args: Record<string, unknown>, ctx: ReviewConte
   if (searchText.trim() === '') return 'Error: search_text is blank';
 
   const caseSensitive = args['case_sensitive'] === true;
-  const useExtendedRegexp = args['use_extended_regexp'] === true;
+  const usePerlRegexp = args['use_perl_regexp'] === true || args['use_extended_regexp'] === true;
   const filePatterns = stringArray(args['file_patterns']);
-  const gitArgs = buildGrepArgs(ctx, searchText, caseSensitive, useExtendedRegexp, filePatterns);
+  const gitArgs = buildGrepArgs(ctx, searchText, caseSensitive, usePerlRegexp, filePatterns);
 
   let result: { stdout: string; stderr: string; code: number };
   try {
@@ -80,8 +83,6 @@ export async function searchCode(args: Record<string, unknown>, ctx: ReviewConte
     if (matchCount >= GIT_GREP_MAX_COUNT) break;
     const parts = line.split(':');
     if (parts.length < splitN) continue;
-    const prefix = parts.slice(0, offset).join(':');
-    void prefix;
     const fname = parts[offset];
     const lineNum = Number.parseInt(parts[offset + 1], 10);
     const content = parts.slice(offset + 2).join(':');

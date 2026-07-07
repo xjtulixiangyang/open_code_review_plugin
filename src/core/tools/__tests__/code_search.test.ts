@@ -84,7 +84,17 @@ test('searchCode honors file_patterns pathspecs', async () => {
   }
 });
 
-test('searchCode supports extended regular expressions when requested', async () => {
+test('searchCode supports Perl regular expressions when requested', async () => {
+  const { repo } = await setupRepo();
+  try {
+    const out = await searchCode({ search_text: 'NEW_[A-Z]+', use_perl_regexp: true }, ctx(repo, 'workspace'));
+    assert.match(out, /NEW_TOKEN/);
+  } finally {
+    await rm(repo, { recursive: true, force: true });
+  }
+});
+
+test('searchCode supports extended regexp as backward-compatible alias', async () => {
   const { repo } = await setupRepo();
   try {
     const out = await searchCode({ search_text: 'NEW_[A-Z]+', use_extended_regexp: true }, ctx(repo, 'workspace'));
