@@ -27,6 +27,10 @@ function buildGrepArgs(
 
   const ref = resolveContextRef(ctx);
   if (ref) {
+    // --end-of-options is intentionally omitted here: Apple Git 2.37.1 does
+    // not support it with `git grep`. The ref comes from ReviewContext and is
+    // normally a commit hash, branch, tag, or ref name, so this is an accepted
+    // portability tradeoff for local git compatibility.
     args.push(ref);
   }
 
