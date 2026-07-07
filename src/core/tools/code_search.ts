@@ -23,6 +23,9 @@ function buildGrepArgs(
   // when available but Apple Git lacks PCRE support. The public arg name
   // use_perl_regexp is kept for OCR API compatibility.
   args.push(usePerlRegexp ? '-E' : '-F');
+  // --max-count is intentionally omitted: Apple Git 2.37.1 (macOS) does not
+  // support that option with git grep. The 100-match cap is enforced in JS
+  // post-processing below via GIT_GREP_MAX_COUNT.
   args.push('-n', '--no-color', '-e', searchText);
 
   const ref = resolveContextRef(ctx);
