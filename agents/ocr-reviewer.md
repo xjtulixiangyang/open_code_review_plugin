@@ -6,8 +6,6 @@ description: |
   Bash CLI. Always ends with bin/task_done.
 tools:
   - Read
-  - Glob
-  - Grep
   - Bash
 ---
 
