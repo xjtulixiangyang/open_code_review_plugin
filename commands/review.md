@@ -108,9 +108,6 @@ For each file in a batch:
    <planGuidance string or "">
    currentSystemDateTime: <ISO-8601>
    ```
-4. Retry reviewer dispatch at most once for the same file when the subagent errors, times out, or returns without a matching `.ocr-runs/<runId>/done/reviewer-*.json` entry for that file. Use `reviewer-<index>-attempt-2` for the retry subagent id. Do not retry a file after `task_done` is recorded.
-5. If both attempts fail, continue to the next file and let `ocr-aggregate` report the file as partial (`OCRP-SUB-050/051`).
-
 4. Retry reviewer dispatch exactly once for the same file when any of these happens:
    - the subagent errors;
    - the subagent times out;
