@@ -61,6 +61,10 @@ test('resolveContextRef returns right side for two-dot range', () => {
   assert.equal(resolveContextRef(ctx('/repo', 'main..feature')), 'feature');
 });
 
+test('resolveContextRef returns right side for three-dot range', () => {
+  assert.equal(resolveContextRef(ctx('/repo', 'main...feature')), 'feature');
+});
+
 test('readContextFile reads workspace content when range has no ref', async () => {
   const { repo } = await setupRepo();
   try {
