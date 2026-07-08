@@ -63,7 +63,12 @@ export function renderMarkdownReport(
   lines.push('');
 
   if (comments.length === 0) {
-    lines.push(`Review complete — no issues found in ${ctx.files.length} file(s).`);
+    if (opts.partialFiles.length > 0) {
+      lines.push('Review incomplete — no issues were reported by completed reviewers.');
+      lines.push(`Files incomplete: ${opts.partialFiles.length}`);
+    } else {
+      lines.push(`Review complete — no issues found in ${ctx.files.length} file(s).`);
+    }
     return lines.join('\n');
   }
 
