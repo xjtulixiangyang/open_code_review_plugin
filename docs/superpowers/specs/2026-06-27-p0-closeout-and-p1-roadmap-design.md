@@ -155,7 +155,7 @@ P0 应保证 `LlmComment` 字段稳定，partial/no-comment 输出稳定，JSON 
 | range review | OCR 使用 merge-base 到 `to` | 插件当前直接 range | P0 必须补齐/决策 | 推荐改为 OCR merge-base 语义 |
 | paths/include | 只审查部分路径 | 插件支持 `--paths`，当前正在修 workspace | P0 必须补齐/验证 | 保留修复并扩展测试 |
 | background | 注入 prompt | 已透传 | P0 已具备 | 长度/安全限制后移 |
-| concurrency | OCR semaphore 默认 8 | 插件靠 command 编排约束 | P0 必须修正 | 文档说明或明确调度约束 |
+| concurrency | OCR semaphore 默认 8 | 插件靠 command 编排约束，默认 2、上限 8 | P0 已修正 | 默认低并发保障 Claude Code subagent 稳定性；遇到 503/timeout/partial 时可用 `--concurrency 1` |
 | preview/dry-run | OCR 有 preview | 插件 parse 但未实现 | P0 必须修正 | 实现最小 preview 或标为 P1 unsupported |
 | custom rules | OCR `--rule` | 插件 parse `--rules` 但未加载 | P0 必须修正 | P0 不静默忽略，P1 实现 |
 

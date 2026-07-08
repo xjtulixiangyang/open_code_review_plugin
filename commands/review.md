@@ -76,7 +76,7 @@ Otherwise skip this step.
 
 ### Step 3 — Dispatch reviewer subagents in parallel
 
-Process `context.files[]` in bounded batches. Let `reviewConcurrency = prepareSummary.concurrency || 2`. Dispatch at most `reviewConcurrency` reviewer subagents at the same time. Do not start the next batch until every file in the current batch has either completed review or exhausted its retry attempts.
+Process `context.files[]` in bounded batches. Let `reviewConcurrency = prepareSummary.concurrency || 2`. Dispatch at most `reviewConcurrency` reviewer subagents at the same time. Do not start the next batch until every file in the current batch has either completed review or exhausted its retry attempts. The stable default is `2`; when a run hits API 503s, reviewer timeouts, or many partial files, rerun with `--concurrency 1`.
 
 For each file in a batch:
 
@@ -108,8 +108,12 @@ For each file in a batch:
    <planGuidance string or "">
    currentSystemDateTime: <ISO-8601>
    ```
-4. Retry reviewer dispatch at most once for the same file when the subagent errors, times out, or returns without a matching `.ocr-runs/<runId>/done/reviewer-*.json` entry for that file. Use `reviewer-<index>-attempt-2` for the retry subagent id. Do not retry a file after `task_done` is recorded.
-5. If both attempts fail, continue to the next file and let `ocr-aggregate` report the file as partial (`OCRP-SUB-050/051`).
+4. Retry reviewer dispatch exactly once for the same file when any of these happens:
+   - the subagent errors;
+   - the subagent times out;
+   - the subagent returns but no matching `.ocr-runs/<runId>/done/reviewer-*.json` entry exists for that file.
+   Use `reviewer-<index>-attempt-2` for the retry subagent id. Do not retry a file after `task_done` is recorded.
+5. If both attempts fail, continue to the next file and let `ocr-aggregate` report the file as partial (`OCRP-SUB-050/051`). A partial file means review did not complete for that file; it must not be described as a clean no-issue result.
 
 ### Step 3.5 — Per-file filter (REVIEW_FILTER_TASK)
 
@@ -162,7 +166,7 @@ Read `.ocr-runs/<runId>/report.md` and reply with its full contents inline. Also
 - `<repo>/.ocr-runs/<runId>/comments.jsonl`
 - `<repo>/.ocr-runs/<runId>/filters/` (when any comments were filtered)
 
-If `partial == true`, prefix your message with: `⚠️ Some files did not complete review; see Warnings section.`
+If `partial == true`, prefix your message with: `⚠️ Some files did not complete review; see Warnings section.` Do not summarize the run as "no issues found" without also saying the review was incomplete for `partialFiles[]`.
 
 ### Step 6 — Post to PR (optional)
 

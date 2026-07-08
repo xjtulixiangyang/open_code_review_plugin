@@ -46,7 +46,7 @@ Inside Claude Code:
 |---|---|---|---|---|
 | `-b, --background "ctx"` | same | "" | Injected into reviewer prompt |
 | `--paths "g1,g2"` | include/path filter | — | Limits changed files before review |
-| `--concurrency <n>` | same | 2 | Controls how many file reviewer subagents are dispatched at once. Default is `2` for stability. Values above `8` are capped to `8`. |
+| `--concurrency <n>` | same | 2 | Controls how many file reviewer subagents are dispatched at once. Default is `2` for stability in Claude Code sessions; use `--concurrency 1` when API 503/timeouts or partial reviews appear. Values above `8` are capped to `8`. |
 | `--format markdown|json|both` | `--format` | both | Controls aggregate artifacts |
 | `--preview`, `-p` | same | false | Show review preview without running review. Does not call PLAN, reviewer, filter, relocate, or aggregate. |
 | `--dry-run` | same | false | Same as --preview. Sets `dryRun: true` in the review context for future tooling integration. |

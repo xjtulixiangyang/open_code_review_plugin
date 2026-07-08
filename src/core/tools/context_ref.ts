@@ -6,9 +6,14 @@ export function resolveContextRef(ctx: ReviewContext): string | undefined {
     const ref = ctx.range.slice('commit:'.length).trim();
     return ref || undefined;
   }
-  const idx = ctx.range.indexOf('..');
-  if (idx !== -1) {
-    const to = ctx.range.slice(idx + 2).trim();
+  const threeDotIdx = ctx.range.lastIndexOf('...');
+  if (threeDotIdx !== -1) {
+    const to = ctx.range.slice(threeDotIdx + 3).trim();
+    return to || undefined;
+  }
+  const twoDotIdx = ctx.range.lastIndexOf('..');
+  if (twoDotIdx !== -1) {
+    const to = ctx.range.slice(twoDotIdx + 2).trim();
     return to || undefined;
   }
   const trimmed = ctx.range.trim();
