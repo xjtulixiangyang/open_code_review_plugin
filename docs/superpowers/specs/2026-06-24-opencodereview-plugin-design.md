@@ -316,7 +316,7 @@ frontmatter `tools: [Read, Glob, Grep, Bash]`。system prompt 中声明 Bash 只
 
 ### 5.1 关键并发与容错点
 
-- **并发上限**：受 Claude Code 自身并发约束（一般 ≤10）。`ocr-prepare` 输出 `fileCount`，`review.md` 编排时按上限分批；默认 8（对齐 OCR `--concurrency 8`）。
+- **并发上限**：OCR 原版默认 `--concurrency 8` 并用 semaphore 控制；本插件在 Claude Code subagent 编排下默认 `2` 以提升稳定性，`ocr-prepare` 输出 effective `concurrency`，`review.md` 按该值分批。遇到 API 503、timeout 或 partial 文件较多时，建议用 `--concurrency 1` 重跑；用户显式设置高并发时仍最高 capped 到 `8`。
 - **subagent 死掉/未完成**：每个 subagent 必须在结束前调一次 `task_done` → 写入 `done/<subagent>.json`。aggregate 阶段比对 `done/` 文件数与派发数；缺少的视为未完成，对该文件标 `partial: true` 并在 Markdown 顶部加 ⚠️ 警告（对应 OCR 的 `AgentWarning`）。注意：本插件不主动计时杀 subagent，"未完成"靠 `done/` 缺失推断而非时钟。
 - **hook 失败不阻塞**：实时回显是"事件总线"，挂掉只丢进度提示，持久化总线（jsonl）由 bin/ CLI 子进程同步写入完成。最终聚合**只依赖 jsonl**，不依赖 hook 是否成功 → 双总线 = 鲁棒。
 - **PLAN 短路**：当 `totalChangedLines ≤ 50` 时跳过阶段 2，直接进入阶段 3，`ReviewerInput.planGuidance` 留空字符串。

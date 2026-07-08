@@ -76,7 +76,7 @@ Otherwise skip this step.
 
 ### Step 3 — Dispatch reviewer subagents in parallel
 
-Process `context.files[]` in bounded batches. Let `reviewConcurrency = prepareSummary.concurrency || 2`. Dispatch at most `reviewConcurrency` reviewer subagents at the same time. Do not start the next batch until every file in the current batch has either completed review or exhausted its retry attempts.
+Process `context.files[]` in bounded batches. Let `reviewConcurrency = prepareSummary.concurrency || 2`. Dispatch at most `reviewConcurrency` reviewer subagents at the same time. Do not start the next batch until every file in the current batch has either completed review or exhausted its retry attempts. The stable default is `2`; when a run hits API 503s, reviewer timeouts, or many partial files, rerun with `--concurrency 1`.
 
 For each file in a batch:
 
