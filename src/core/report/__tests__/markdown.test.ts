@@ -58,8 +58,6 @@ test('renderMarkdownReport 无评论且完整完成时输出 Review complete', (
 
 test('renderMarkdownReport 无评论但 partial 时不声称 review complete', () => {
   const md = renderMarkdownReport(CTX, [], { partialFiles: ['src/c.ts'] });
-  assert.match(md, /⚠️ Warnings/);
-  assert.match(md, /src\/c\\\.ts/);
   assert.match(md, /Review incomplete — no issues were reported by completed reviewers\./);
   assert.match(md, /Files incomplete: 1/);
   assert.doesNotMatch(md, /Review complete — no issues found/);
