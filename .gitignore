@@ -21,3 +21,8 @@ npm-debug.log*
 # Legacy debug logs
 .claude-sdk-debug.log
 latest
+# Worktrees & intermediate artifacts
+.claude/worktrees/
+codespec/superpowers/
+codespec/design.md
+codespec/spec.md
