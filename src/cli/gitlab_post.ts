@@ -31,6 +31,7 @@ async function getMrVersion(projectId: string, pr: string, token: string): Promi
   const r = await exec('curl', [
     '--silent',
     '--show-error',
+    '--fail-with-body',
     '--header',
     `PRIVATE-TOKEN: ${token}`,
     `https://gitlab.com/api/v4/projects/${projectId}/merge_requests/${pr}/versions`,
@@ -69,6 +70,7 @@ async function postDiscussion(
   const args = [
     '--silent',
     '--show-error',
+    '--fail-with-body',
     '--request',
     'POST',
     `https://gitlab.com/api/v4/projects/${projectId}/merge_requests/${pr}/discussions`,
@@ -96,6 +98,7 @@ async function postNote(projectId: string, pr: string, token: string, ctx: Revie
   const r = await exec('curl', [
     '--silent',
     '--show-error',
+    '--fail-with-body',
     '--request',
     'POST',
     `https://gitlab.com/api/v4/projects/${projectId}/merge_requests/${pr}/notes`,
