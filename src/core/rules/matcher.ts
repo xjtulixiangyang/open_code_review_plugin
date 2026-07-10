@@ -83,10 +83,10 @@ export interface ResolvedRule {
  */
 export function resolveRule(
   filePath: string,
-  custom: LoadedCustomRules,
+  custom: LoadedCustomRules | null,
 ): ResolvedRule {
   // Try custom rules first
-  for (const entry of custom.rules) {
+  for (const entry of custom?.rules ?? []) {
     if (globToRegExp(entry.path).test(filePath)) {
       return {
         ruleId: `custom:${entry.path}`,

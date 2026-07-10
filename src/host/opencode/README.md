@@ -1,12 +1,34 @@
-# opencode HostAdapter (placeholder, P1+)
+# opencode HostAdapter
 
-This directory is reserved for the future opencode HostAdapter implementation.
-P0 of open-code-review-plugin only targets Claude Code (see ../claude-code/).
+Cross-host adapter for OpenCode. Review command, skills, and agents are
+installed to `~/.config/opencode/` via `scripts/install-opencode.sh`.
 
-To add opencode support later:
-1. Mirror `../claude-code/hook_handler.ts` to `./hook_handler.ts`.
-2. Add a `commands/`, `agents/`, `skills/` set appropriate to opencode's plugin
-   contract (the design assumes the same `bin/` CLI shape works unchanged).
-3. Update `.claude-plugin/plugin.json` or add a sibling `.opencode-plugin/plugin.json`.
+## Installation
 
-See `docs/superpowers/specs/2026-06-24-opencodereview-plugin-design.md` §1 for the cross-host alignment rationale.
+```bash
+./scripts/install-opencode.sh
+```
+
+## Differences from Claude Code
+
+| Feature | Claude Code | OpenCode |
+|---|---|---|
+| Parallel review | ✅ batches of `reviewConcurrency` | ❌ sequential (single-agent) |
+| Event bus | ✅ events.jsonl + hooks | ❌ not available |
+| Custom rules | ✅ (same CLI) | ✅ (same CLI) |
+| Resume | ✅ (same CLI) | ✅ (same CLI) |
+| Preview / dry-run | ✅ | ✅ |
+
+## Tool name convention
+
+OpenCode uses **lowercase** tool names (`allowed-tools` frontmatter). The
+adapter and agent definitions export this mapping automatically.
+
+## Testing
+
+After install, verify with:
+
+```bash
+opencode debug skill                 # should list open-code-review skills
+opencode debug agent ocr-reviewer    # should show reviewer agent
+```

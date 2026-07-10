@@ -88,7 +88,7 @@ export function isAllowed(path: string, extraExclude: string[] = []): boolean {
 export type FileScopeReason =
   | 'unsupported-ext'
   | 'user-exclude'
-  | 'user-include'
+  | 'not-in-include'
   | 'default-exclude'
   | 'ok';
 
@@ -102,19 +102,19 @@ export interface FileScopeResult {
  */
 export function isFileInScope(
   filePath: string,
-  custom: { include: string[]; exclude: string[] },
+  custom: { include: string[]; exclude: string[] } | null,
 ): FileScopeResult {
   const ext = extname(filePath);
   const exts = loadSupportedExtensions();
   if (!exts.includes(ext)) return { allowed: false, reason: 'unsupported-ext' };
 
-  if (custom.exclude.length > 0 && matchAny(filePath, custom.exclude)) {
+  if (custom?.exclude.length && matchAny(filePath, custom.exclude)) {
     return { allowed: false, reason: 'user-exclude' };
   }
 
-  if (custom.include.length > 0) {
+  if (custom?.include.length) {
     if (!matchAny(filePath, custom.include)) {
-      return { allowed: false, reason: 'user-include' };
+      return { allowed: false, reason: 'not-in-include' };
     }
     return { allowed: true, reason: 'ok' };
   }
