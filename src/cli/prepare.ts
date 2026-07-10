@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+import { resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { buildReviewContext } from '../core/context/review_context.js';
 import { writeContext } from '../core/runs/store.js';
 import { MAX_FILES_PER_RUN } from '../core/prompts/constants.js';
@@ -16,6 +18,7 @@ export interface ParsedArgs {
   paths?: string[];
   background?: string;
   rulesPath?: string;
+  plansPath?: string;
   format?: 'markdown' | 'json' | 'both';
   concurrency?: number;
   unsupported: string[];
@@ -50,6 +53,8 @@ export function parseArgs(argv: string[]): ParsedArgs {
     else if (a === '--background' || a === '-b') out.background = next();
     else if (a === '--rules' || a === '--rule') {
       out.rulesPath = next();
+    } else if (a === '--plans') {
+      out.plansPath = next();
     } else if (a === '--format' || a === '-f') out.format = next() as ParsedArgs['format'];
     else if (a === '--concurrency') out.concurrency = parseInt(next(), 10);
     else if (a === '--dry-run') {
@@ -102,6 +107,7 @@ async function main(): Promise<void> {
     paths: args.paths,
     background: args.background,
     rulesPath: args.rulesPath,
+    plansPath: args.plansPath,
     format: args.format,
     concurrency,
     preview: args.preview,
@@ -124,6 +130,7 @@ async function main(): Promise<void> {
     resumed: ctx.resumed ?? false,
     remainingFileCount: ctx.remainingFileCount ?? ctx.files.length,
     rulesSource: ctx.rulesSource ?? 'system',
+    plansGuidanceSource: ctx.plansGuidanceSource,
     excludedFileCount: ctx.excludedFiles?.length ?? 0,
     fileCountWarning: ctx.files.length > MAX_FILES_PER_RUN,
     contextPath: `.ocr-runs/${ctx.runId}/context.json`,
@@ -131,8 +138,10 @@ async function main(): Promise<void> {
   process.stdout.write(JSON.stringify(summary, null, 2) + '\n');
 }
 
-main().catch((err) => {
-  const code = (err && err.message && /OCRP-/.test(err.message)) ? 2 : 1;
-  process.stderr.write(`[ocr-prepare] ${err?.message ?? err}\n`);
-  process.exit(code);
-});
+if (resolve(process.argv[1] ?? '') === fileURLToPath(import.meta.url)) {
+  main().catch((err) => {
+    const code = (err && err.message && /OCRP-/.test(err.message)) ? 2 : 1;
+    process.stderr.write(`[ocr-prepare] ${err?.message ?? err}\n`);
+    process.exit(code);
+  });
+}

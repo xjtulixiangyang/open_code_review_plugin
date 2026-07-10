@@ -5,6 +5,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { parseArgs } from '../prepare.js';
 
 const execFileAsync = promisify(execFile);
 const ROOT = process.cwd();
@@ -98,3 +99,31 @@ test('ocr-prepare --dry-run succeeds and writes dryRun summary/context', async (
     await rm(repo, { recursive: true, force: true });
   }
 });
+
+test('parseArgs accepts --plans and stores plansPath', () => {
+  const args = parseArgs(['--plans', 'review-plans.md']);
+  assert.equal(args.plansPath, 'review-plans.md');
+});
+
+test('ocr-prepare --plans writes custom plans guidance into context and summary', async () => {
+  const repo = await mkdtemp(join(tmpdir(), 'ocrp-prepare-'));
+  try {
+    await execFileAsync('git', ['init'], { cwd: repo });
+    await execFileAsync('git', ['config', 'user.email', 'test@test'], { cwd: repo });
+    await execFileAsync('git', ['config', 'user.name', 'Test'], { cwd: repo });
+    await execFileAsync('git', ['commit', '--allow-empty', '-m', 'init'], { cwd: repo });
+    await writeFile(join(repo, 'plans.md'), 'custom plan guidance');
+
+    const { stdout } = await runPrepare(repo, ['--plans', 'plans.md']);
+    const summary = JSON.parse(stdout);
+    assert.equal(summary.plansGuidanceSource, 'plans.md');
+
+    const contextPath = join(repo, summary.contextPath);
+    const ctx = JSON.parse(await readFile(contextPath, 'utf8'));
+    assert.equal(ctx.plansGuidanceSource, 'plans.md');
+    assert.equal(ctx.plansGuidanceText, 'custom plan guidance');
+  } finally {
+    await rm(repo, { recursive: true, force: true });
+  }
+});
+

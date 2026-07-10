@@ -3,6 +3,7 @@ import { collectWorkspaceDiff } from '../diff/workspace.js';
 import { parseUnifiedDiff } from '../diff/parser.js';
 import { isFileInScope } from '../allowlist/allowed_ext.js';
 import { loadCustomRules } from '../rules/custom_rules.js';
+import { loadPlansGuidance } from '../plans/custom_plans.js';
 import { resolveRule } from '../rules/matcher.js';
 import { MAX_HUNK_LINES, MAX_FILE_CHANGED_LINES, PLUGIN_VERSION } from '../prompts/constants.js';
 import { newRunId, listDone } from '../runs/store.js';
@@ -41,6 +42,7 @@ export async function buildReviewContext(req: ReviewRequest): Promise<ReviewCont
 
   // Load custom rules and apply file scoping
   const customRules = await loadCustomRules(repoRoot, req.rulesPath);
+  const plansGuidance = await loadPlansGuidance(repoRoot, req.plansPath);
   const excludedFiles: Array<{ path: string; reason: string }> = [];
   const scopedFiles: FileChange[] = [];
 
@@ -107,6 +109,8 @@ export async function buildReviewContext(req: ReviewRequest): Promise<ReviewCont
     files,
     changeFiles: files.map((f) => f.path),
     rulesSource: customRules.source,
+    plansGuidanceSource: plansGuidance.source,
+    plansGuidanceText: plansGuidance.text,
     excludedFiles,
     preview: req.preview === true,
     dryRun: req.dryRun === true,

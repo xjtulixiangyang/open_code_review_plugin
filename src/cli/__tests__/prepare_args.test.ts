@@ -1,5 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { join } from 'node:path';
 import {
   DEFAULT_REVIEW_CONCURRENCY,
   MAX_REVIEW_CONCURRENCY,
@@ -7,6 +10,20 @@ import {
   parseArgs,
 } from '../prepare.js';
 
+const execFileAsync = promisify(execFile);
+const ROOT = process.cwd();
+const TSX = join(ROOT, 'node_modules', 'tsx', 'dist', 'loader.mjs');
+
+test('importing prepare helpers does not execute the CLI', async () => {
+  const { stdout } = await execFileAsync('node', [
+    '--import',
+    TSX,
+    '--input-type=module',
+    '--eval',
+    "import './src/cli/prepare.ts';",
+  ], { cwd: ROOT });
+  assert.equal(stdout, '');
+});
 test('parseArgs accepts --rules and stores rulesPath', () => {
   const args = parseArgs(['--rules', 'team-rules.yaml']);
   assert.equal(args.rulesPath, 'team-rules.yaml');

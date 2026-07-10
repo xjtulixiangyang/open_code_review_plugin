@@ -46,6 +46,7 @@ export interface ReviewRequest {
   paths?: string[];
   background?: string;
   rulesPath?: string;
+  plansPath?: string;
   preview?: boolean;
   dryRun?: boolean;
   resumeRunId?: string;
@@ -62,6 +63,8 @@ export interface ReviewContext {
   files: FileChange[];
   changeFiles: string[];
   rulesSource?: string;
+  plansGuidanceSource?: string;
+  plansGuidanceText?: string;
   excludedFiles?: Array<{ path: string; reason: string }>;
   preview?: boolean;
   dryRun?: boolean;
