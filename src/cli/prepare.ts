@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { resolve } from 'node:path';
+import { realpath } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { buildReviewContext } from '../core/context/review_context.js';
 import { writeContext } from '../core/runs/store.js';
@@ -138,7 +138,13 @@ async function main(): Promise<void> {
   process.stdout.write(JSON.stringify(summary, null, 2) + '\n');
 }
 
-if (resolve(process.argv[1] ?? '') === fileURLToPath(import.meta.url)) {
+async function isDirectCliInvocation(): Promise<boolean> {
+  const argvPath = process.argv[1];
+  if (!argvPath) return false;
+  return await realpath(argvPath) === fileURLToPath(import.meta.url);
+}
+
+if (await isDirectCliInvocation()) {
   main().catch((err) => {
     const code = (err && err.message && /OCRP-/.test(err.message)) ? 2 : 1;
     process.stderr.write(`[ocr-prepare] ${err?.message ?? err}\n`);
