@@ -176,7 +176,15 @@ If the user requests posting review comments to a PR:
    ```bash
    ocr-post-comments --runId <runId> --provider <github|gitlab> --pr <number>
    ```
-2. The stdout JSON contains `posted`, `failed`, and `skipped`. Reply with a summary.
+2. Comments are posted as **inline review comments** on the diff (GitHub
+   `pulls.createReview`, GitLab Discussions API). A multi-level fallback
+   strategy is used: batch inline review → individual inline → plain
+   PR/MR comment.
+3. Use `--dry-run` to preview the comments that would be posted without
+   calling the platform API.
+4. Use `--retry <n>` to set the per-comment retry count (default: 1).
+5. The stdout JSON contains `posted`, `failed`, `skipped`, and `details`.
+   Reply with a summary.
 
 ## Error handling
 
