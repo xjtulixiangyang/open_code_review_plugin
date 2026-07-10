@@ -1,4 +1,6 @@
-import type { HostAdapter } from '../claude-code/adapter.js';
+import type { HostAdapter } from '../types.js';
+
+export type { HostAdapter };
 
 export const opencodeAdapter: HostAdapter = {
   name: 'opencode',

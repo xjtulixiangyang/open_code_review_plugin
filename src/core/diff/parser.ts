@@ -1,6 +1,7 @@
 import type { FileChange, Hunk, DiffLine } from '../model/request.js';
 import type { FileStatus } from '../types.js';
 import { hashHunk } from './hunk.js';
+import { NULL_PATH_ALTS } from './null_path.js';
 
 const DIFF_HEADER = /^diff --git a\/(.+?) b\/(.+)$/;
 const HUNK_HEADER = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/;
@@ -119,11 +120,11 @@ export function parseUnifiedDiff(
       cur.status = 'renamed';
       continue;
     }
-    if (line === '--- /dev/null') {
+    if (NULL_PATH_ALTS.some(alt => line === `--- ${alt}`)) {
       cur.status = 'added';
       continue;
     }
-    if (line === '+++ /dev/null') {
+    if (NULL_PATH_ALTS.some(alt => line === `+++ ${alt}`)) {
       cur.status = 'deleted';
       continue;
     }

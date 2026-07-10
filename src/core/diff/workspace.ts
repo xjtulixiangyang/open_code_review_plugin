@@ -1,9 +1,10 @@
 import { spawn } from 'node:child_process';
 import { runGit, gitDiff } from './git.js';
+import { NULL_PATH } from './null_path.js';
 
 async function rawGitDiffNoIndex(repoRoot: string, file: string): Promise<string> {
   return new Promise((resolve, reject) => {
-    const child = spawn('git', ['diff', '--no-color', '-U3', '--no-index', '--', '/dev/null', file], {
+    const child = spawn('git', ['diff', '--no-color', '-U3', '--no-index', '--', NULL_PATH, file], {
       cwd: repoRoot,
     });
     let stdout = '';
