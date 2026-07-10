@@ -2,7 +2,7 @@
 description: |
   Run the open-code-review-plugin code review on a git change set. Pass-through
   flags align with alibaba/open-code-review CLI: workspace (default), --staged,
-  --commit <sha>, --from <a> --to <b>, --paths, --background, --rules.
+  --commit <sha>, --from <a> --to <b>, --paths, --background, --rules, --plans.
 argument-hint: "[workspace|staged|<sha>|<from>..<to>] [--background \"...\"]"
 allowed-tools: read, glob, grep, bash, write
 ---
@@ -29,7 +29,7 @@ ocr-prepare $ARGUMENTS
 
 Capture the stdout JSON. It contains `runId`, `fileCount`, `hunkCount`,
 `changedLines`, `contextPath`, `concurrency`, `preview`, `dryRun`, `resumed`,
-`remainingFileCount`, `rulesSource`, `excludedFileCount`, and `fileCountWarning`.
+`remainingFileCount`, `rulesSource`, `plansGuidanceSource`, `excludedFileCount`, and `fileCountWarning`.
 If `concurrency` is absent, use `2`.
 
 If `fileCount` is 0 → tell the user "No changes to review." and stop.
@@ -68,11 +68,11 @@ For **each** file:
 0. Skip files where `skipped === true`; mention them in the final report
    under "Skipped files" with their path and skipReason. Do not review.
 
-1. **planGuidance** — If `.ocr-runs/<runId>/plan.json` exists, run:
+1. **planGuidance** — Run:
    ```bash
    ocr-plan-guidance --runId <runId> --path <currentFilePath>
    ```
-   Parse stdout and use its `guidance` field. On failure, set guidance to ""
+   Parse stdout and use its `guidance` field. The returned `guidance` may include both file-specific PLAN output and repository/user custom plans guidance loaded via `--plans`, `.code-review-plans.md`, or `~/.code-review/plans.md`. On failure, set guidance to ""
    and mention `OCRP-SKILL-040`.
 
 2. **systemRule** — Compute from `context.files[].rulesHit[0]`:

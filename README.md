@@ -43,16 +43,18 @@ Inside Claude Code:
 | `<from>..<to>` or `--from <a> --to <b>` | range |
 
 | Flag | Equivalent OCR flag | Default | P0 behavior |
-|---|---|---|---|---|
+|---|---|---|---|
 | `-b, --background "ctx"` | same | "" | Injected into reviewer prompt |
 | `--paths "g1,g2"` | include/path filter | — | Limits changed files before review |
 | `--concurrency <n>` | same | 2 | Controls how many file reviewer subagents are dispatched at once. Default is `2` for stability in Claude Code sessions; use `--concurrency 1` when API 503/timeouts or partial reviews appear. Values above `8` are capped to `8`. |
 | `--format markdown|json|both` | `--format` | both | Controls aggregate artifacts |
 | `--preview`, `-p` | same | false | Show review preview without running review. Does not call PLAN, reviewer, filter, relocate, or aggregate. |
 | `--dry-run` | same | false | Same as --preview. Sets `dryRun: true` in the review context for future tooling integration. |
-`--preview`, `-p`, and `--dry-run` run deterministic prepare only. They show the review range, files that would be reviewed, excluded files, matched rule IDs, rules source, and concurrency. Preview/dry-run mode does not call the PLAN skill, reviewer subagents, filter, relocate, or aggregate, and it does not generate formal `report.md` / `report.json` artifacts.
+| `--rules <path>`, `--rule <path>` | custom rules | — | Loads YAML/JSON custom rules and file scoping |
+| `--plans <path>` | custom plan guidance | — | Loads markdown review planning guidance and appends it to per-file reviewer guidance |
+`--preview`, `-p`, and `--dry-run` run deterministic prepare only. They show the review range, files that would be reviewed, excluded files, matched rule IDs, rules source, custom plans guidance source, and concurrency. Preview/dry-run mode does not call the PLAN skill, reviewer subagents, filter, relocate, or aggregate, and it does not generate formal `report.md` / `report.json` artifacts.
 
-The `--rules` / `--rule` flag is now fully supported (see Configuration).
+The `--rules` / `--rule` flag is fully supported (see Configuration). The `--plans` flag is supported for custom review planning guidance (see Configuration).
 
 ## 4. Architecture
 
@@ -117,6 +119,28 @@ rules:
 
 `include` narrows the reviewed file set. `exclude` removes files from the reviewed file set. `rules` are first-match-wins and override the built-in rule text for matching paths.
 
+### Custom plans guidance
+
+Custom plans guidance is optional markdown that is appended to the per-file `planGuidance` passed to reviewer and filter prompts. Use it for repository- or team-specific planning instructions that should complement the generated PLAN output.
+
+It is loaded in this priority order:
+
+1. CLI `--plans <path>`
+2. Repository `.code-review-plans.md`
+3. User `~/.code-review/plans.md`
+
+Example:
+
+```markdown
+# Review planning guidance
+
+- Check migration changes against the compatibility matrix.
+- Prefer comments that identify externally visible behavior changes.
+- Do not require refactors unrelated to the reviewed diff.
+```
+
+When present, `ocr-prepare` records `plansGuidanceSource` and `plansGuidanceText` in `.ocr-runs/<runId>/context.json`; `ocr-plan-guidance` combines this custom markdown with any file-specific PLAN output.
+
 ## 7. Troubleshooting
 
 | Error code | Meaning | Fix |
@@ -125,6 +149,7 @@ rules:
 | `OCRP-RUN-010` | Not in a git repo | `cd` to a repo root |
 | `OCRP-RUN-011` | Argument conflict or unsupported flag | Use only one review target |
 | `OCRP-RUN-012` | No changes | Stage something or pick a non-trivial range |
+| `OCRP-PLANS-100` | Custom plans file cannot be read | Check the `--plans` path and permissions, or remove `--plans` to use default lookup |
 | `OCRP-SKILL-040` | PLAN output unparseable | Already downgraded; main review still runs |
 | `OCRP-SUB-050/051` | Some subagents did not finish | Report flagged `partial: true` |
 | `OCRP-HOOK-060` | Hook failed | Silent; final result unaffected |

@@ -2,7 +2,7 @@
 description: |
   Run the open-code-review-plugin code review on a git change set. Pass-through
   flags align with alibaba/open-code-review CLI: workspace (default), --staged,
-  --commit <sha>, --from <a> --to <b>, --paths, --background, --rules.
+  --commit <sha>, --from <a> --to <b>, --paths, --background, --rules, --plans.
 argument-hint: "[workspace|staged|<sha>|<from>..<to>] [--background \"...\"]"
 ---
 
@@ -22,7 +22,7 @@ Run Bash:
 ocr-prepare $ARGUMENTS
 ```
 
-Capture the stdout JSON. It contains `runId`, `fileCount`, `hunkCount`, `changedLines`, `contextPath`, `concurrency`, `preview`, `dryRun`, `resumed`, `remainingFileCount`, `rulesSource`, `excludedFileCount`, and `fileCountWarning`. If `concurrency` is absent because an older build produced the summary, use `2`.
+Capture the stdout JSON. It contains `runId`, `fileCount`, `hunkCount`, `changedLines`, `contextPath`, `concurrency`, `preview`, `dryRun`, `resumed`, `remainingFileCount`, `rulesSource`, `plansGuidanceSource`, `excludedFileCount`, and `fileCountWarning`. If `concurrency` is absent because an older build produced the summary, use `2`.
 
 If `fileCount` is 0 → tell the user "No changes to review." and stop. This is a successful skipped review, not a hard failure.
 If the command exits non-zero → surface the stderr to the user and stop.
@@ -82,11 +82,11 @@ For each file in a batch:
 
 0. Skip files where `skipped === true`; mention them in the final report under a "Skipped files" section with their path and skipReason. Do not dispatch a reviewer for these files.
 
-1. Compute `planGuidance` deterministically. If `.ocr-runs/<runId>/plan.json` exists, run:
+1. Compute `planGuidance` deterministically. Run:
    ```bash
    ocr-plan-guidance --runId <runId> --path <currentFilePath>
    ```
-   Parse stdout JSON and use its `guidance` field. If the command fails, set `planGuidance = ""` and mention `OCRP-SKILL-040` in the final report. Do not manually re-implement plan filtering in the main conversation.
+   Parse stdout JSON and use its `guidance` field. The returned `guidance` may include both file-specific PLAN output and repository/user custom plans guidance loaded via `--plans`, `.code-review-plans.md`, or `~/.code-review/plans.md`. If the command fails, set `planGuidance = ""` and mention `OCRP-SKILL-040` in the final report. Do not manually re-implement plan filtering in the main conversation.
 2. Compute `systemRule` from `context.files[].rulesHit[0]`:
    - If `rulesHit[0].text` is a non-empty string, use it verbatim.
    - Else if `rulesHit[0].message` is a non-empty string, use it verbatim.
