@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { planOutputToGuidance } from '../plan_guidance.js';
+import { planOutputToGuidance, combinePlanGuidance } from '../plan_guidance.js';
 import type { PlanOutput } from '../../model/plan.js';
 
 const SAMPLE: PlanOutput = {
@@ -24,7 +24,22 @@ test('planOutputToGuidance 按 severity 降序', () => {
   assert.ok(g.indexOf('high') < g.indexOf('medium'));
 });
 
-test('planOutputToGuidance 无相关条目返回空串', () => {
-  const g = planOutputToGuidance({ change_summary: '', issues: [] }, 'src/foo.ts');
-  assert.equal(g, '');
+
+test('combinePlanGuidance returns empty string when both inputs are empty', () => {
+  assert.equal(combinePlanGuidance('', ''), '');
+});
+
+test('combinePlanGuidance returns custom section when only custom plans exist', () => {
+  const g = combinePlanGuidance('', 'custom guidance');
+  assert.match(g, /Custom plans guidance:/);
+  assert.match(g, /custom guidance/);
+  assert.doesNotMatch(g, /PLAN guidance:/);
+});
+
+test('combinePlanGuidance combines plan and custom sections', () => {
+  const g = combinePlanGuidance('plan guidance', 'custom guidance');
+  assert.match(g, /PLAN guidance:/);
+  assert.match(g, /plan guidance/);
+  assert.match(g, /Custom plans guidance:/);
+  assert.match(g, /custom guidance/);
 });

@@ -34,3 +34,14 @@ export function planOutputToGuidance(plan: PlanOutput, currentFilePath: string):
   }
   return lines.join('\n');
 }
+
+export function combinePlanGuidance(planGuidance: string, customPlansText: string): string {
+  const sections: string[] = [];
+  if (planGuidance.trim()) {
+    sections.push(`PLAN guidance:\n${planGuidance}`);
+  }
+  if (customPlansText.trim()) {
+    sections.push(`Custom plans guidance:\n${customPlansText}`);
+  }
+  return sections.join('\n\n');
+}

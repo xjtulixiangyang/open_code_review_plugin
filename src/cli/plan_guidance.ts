@@ -1,7 +1,8 @@
 #!/usr/bin/env node
-import { readPlan } from '../core/runs/store.js';
-import { planOutputToGuidance } from '../core/prompts/plan_guidance.js';
+import { readContext, readPlan } from '../core/runs/store.js';
+import { combinePlanGuidance, planOutputToGuidance } from '../core/prompts/plan_guidance.js';
 import type { PlanOutput } from '../core/model/plan.js';
+import type { ReviewContext } from '../core/model/request.js';
 
 function parseFlags(argv: string[]): Record<string, string> {
   const out: Record<string, string> = {};
@@ -27,8 +28,21 @@ async function main(): Promise<void> {
   }
 
   const plan = await readPlan<PlanOutput>(f.runId);
-  const guidance = plan ? planOutputToGuidance(plan, f.path) : '';
-  process.stdout.write(JSON.stringify({ guidance }, null, 2) + '\n');
+  const planGuidance = plan ? planOutputToGuidance(plan, f.path) : '';
+  let customPlansText = '';
+  try {
+    const ctx = await readContext<ReviewContext>(f.runId);
+    customPlansText = ctx.plansGuidanceText ?? '';
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+  }
+  const guidance = combinePlanGuidance(planGuidance, customPlansText);
+  process.stdout.write(JSON.stringify({
+    path: f.path,
+    guidance,
+    hasPlan: planGuidance.length > 0,
+    hasCustomPlans: customPlansText.length > 0,
+  }, null, 2) + '\n');
 }
 
 main().catch((err) => {
