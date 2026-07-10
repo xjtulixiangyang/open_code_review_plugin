@@ -63,6 +63,12 @@ If parsing fails, continue without plan guidance and mention `OCRP-SKILL-040`.
 Process `context.files[]` **one at a time, in order**. There is no batching
 or concurrent dispatch in OpenCode.
 
+**Inter-file cooldown:** Wait **3 seconds** after completing all stages
+(review → filter → relocate) for one file before starting the next file.
+This prevents back-to-back subagent dispatches from hitting API rate limits
+(HTTP 503). If the previous file had a subagent timeout or error, extend the
+cooldown to **8 seconds** for that transition only.
+
 For **each** file:
 
 0. Skip files where `skipped === true`; mention them in the final report
