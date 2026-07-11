@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { readContext, readPlan } from '../core/runs/store.js';
+import { readContext, readFilePlan, readPlan } from '../core/runs/store.js';
 import { combinePlanGuidance, planOutputToGuidance } from '../core/prompts/plan_guidance.js';
 import type { PlanOutput } from '../core/model/plan.js';
 import type { ReviewContext } from '../core/model/request.js';
@@ -27,7 +27,7 @@ async function main(): Promise<void> {
     }
   }
 
-  const plan = await readPlan<PlanOutput>(f.runId);
+  const plan = await readFilePlan<PlanOutput>(f.runId, f.path) ?? await readPlan<PlanOutput>(f.runId);
   const planGuidance = plan ? planOutputToGuidance(plan, f.path) : '';
   let customPlansText = '';
   try {
