@@ -48,15 +48,11 @@ If `preview == true` or `dryRun == true`:
 The preview format mirrors the Claude Code command: a Markdown table listing
 files with their status, hunk count, changed lines, and matching rule.
 
-### Step 2 — Plan (only when changedLines >= 50)
+### Step 2 — Load context for per-file PLAN/review
 
-If `changedLines >= 50`:
-1. Read `.ocr-runs/<runId>/context.json`.
-2. Invoke the `ocr-plan` skill with runId.
-3. Parse the fenced ```json PlanOutput.
-4. Write to `.ocr-runs/<runId>/plan.json`.
+Read `.ocr-runs/<runId>/context.json` to load the ReviewContext.
 
-If parsing fails, continue without plan guidance and mention `OCRP-SKILL-040`.
+Generated PLAN is not run once for the whole review. It is run per file in Step 3, matching the original OCR behavior: only files whose own changed-line count is at least `PLAN_MODE_LINE_THRESHOLD` (`50`) get generated PLAN guidance before review.
 
 ### Step 3 — Review files sequentially
 
@@ -74,34 +70,40 @@ For **each** file:
 0. Skip files where `skipped === true`; mention them in the final report
    under "Skipped files" with their path and skipReason. Do not review.
 
-1. **planGuidance** — Run:
+1. **per-file PLAN** — Compute this file's changed-line count as the sum of all `hunk.lines` where `kind != " "` for `currentFilePath`. If the count is at least `50`:
+   - Invoke `ocr-plan` skill with exactly: `runId` and `currentFilePath`.
+   - Parse the fenced ```json PlanOutput.
+   - If parsing succeeds, write it to `.ocr-runs/<runId>/plans/<safePathKey(currentFilePath)>.json`. Use `encodeURIComponent(currentFilePath)` for `<safePathKey(currentFilePath)>`.
+   - If parsing fails, continue without generated PLAN guidance for this file and mention `OCRP-SKILL-040`.
+   If the count is lower than `50`, skip generated PLAN for this file.
+
+2. **planGuidance** — Run:
    ```bash
    ocr-plan-guidance --runId <runId> --path <currentFilePath>
    ```
-   Parse stdout and use its `guidance` field. The returned `guidance` may include both file-specific PLAN output and repository/user custom plans guidance loaded via `--plans`, `.code-review-plans.md`, or `~/.code-review/plans.md`. On failure, set guidance to ""
-   and mention `OCRP-SKILL-040`.
+   Parse stdout and use its `guidance` field. The returned `guidance` may include both this file's generated PLAN output and repository/user custom plans guidance loaded via `--plans`, `.code-review-plans.md`, or `~/.code-review/plans.md`. On failure, set guidance to "" and mention `OCRP-SKILL-040`.
 
-2. **systemRule** — Compute from `context.files[].rulesHit[0]`:
+3. **systemRule** — Compute from `context.files[].rulesHit[0]`:
    - If `rulesHit[0].text` is non-empty, use it.
    - Else if `rulesHit[0].message` is non-empty, use it.
    - Else read `assets/rule_docs/<rulesHit[0].docPath>`.
    - Else use empty string and mention `OCRP-RULES-094`.
 
-3. Apply the **ocr-review-file** skill with the current file's diff. Use
+4. Apply the **ocr-review-file** skill with the current file's diff. Use
    `read` to access `.ocr-runs/<runId>/context.json`. The diff for the
    current file is in `context.files[].diff`.
 
-4. For each confirmed issue, run bash:
+5. For each confirmed issue, run bash:
    ```bash
    code_comment --runId <runId> --args '{"path":"<currentFilePath>","subagent":"reviewer-<index>","comments":[...]}'
    ```
 
-5. After all comments submitted, run bash:
+6. After all comments submitted, run bash:
    ```bash
    task_done --runId <runId> --args '{"subagent":"reviewer-<index>","file":"<currentFilePath>"}'
    ```
 
-6. If the skill invocation errors, retry exactly once for the same file with
+7. If the skill invocation errors, retry exactly once for the same file with
    attempt-2 labeling. If both attempts fail, continue to the next file —
    `ocr-aggregate` will report it as partial (`OCRP-SUB-050/051`).
 
