@@ -1,11 +1,11 @@
 ---
 name: ocr-plan
 description: |
-  Generate a structured review plan (PLAN_TASK) for a code change. Input: a
-  ReviewContext file from .ocr-runs/<runId>/context.json. Output: a JSON
-  object with {change_summary, issues[]}, written to plan.json.
-  Use only when the host /open-code-review:review command requests it
-  (triggered by totalChangedLines >= 50).
+  Generate a structured per-file review plan (PLAN_TASK). Input: runId and
+  currentFilePath from a prepared ReviewContext. Output: a JSON object with
+  {change_summary, issues[]} for that file only.
+  Use only when the host /open-code-review:review command requests it for a
+  file whose changed lines are at least PLAN_MODE_LINE_THRESHOLD (50).
 ---
 
 # OCR Plan Skill
@@ -59,10 +59,12 @@ Strictly follow the JSON format below. Do not include any additional explanatory
 
 ## Input Hand-off
 
-The /open-code-review:review command will pass you the runId and you should:
+The /open-code-review:review command will pass you `runId` and `currentFilePath`. You should:
 
 1. Read `.ocr-runs/<runId>/context.json` to get the ReviewContext (files, diffs, rulesHit).
-2. Produce ONE PlanOutput JSON covering ALL files in `context.files[]`.
-3. Return the JSON inside a single fenced ```json block. The command will parse it and write to `plan.json`.
+2. Find the file where `file.path === currentFilePath`.
+3. Produce ONE PlanOutput JSON for the current file only.
+4. Use `context.changeFiles` only as surrounding context; do not produce issues for other files unless they directly affect the current file's review strategy.
+5. Return the JSON inside a single fenced ```json block. The command will parse it and write to `.ocr-runs/<runId>/plans/<safePathKey(currentFilePath)>.json`.
 
-If your output cannot be parsed as JSON, the host command will downgrade with error code OCRP-SKILL-040 and proceed without plan_guidance.
+If your output cannot be parsed as JSON, the host command will downgrade with error code OCRP-SKILL-040 for this file and proceed without generated plan_guidance.

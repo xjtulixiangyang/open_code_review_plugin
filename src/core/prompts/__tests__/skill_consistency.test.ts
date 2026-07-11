@@ -35,3 +35,13 @@ test('PLAN_TASK TS 常量与 ocr-plan skill 保持关键段落一致', () => {
     assert.ok(skill.includes(snippet), `SKILL PLAN_TASK missing ${snippet}`);
   }
 });
+
+test('ocr-plan skill describes single-file PLAN handoff', () => {
+  const skill = readRoot('skills/ocr-plan/SKILL.md');
+
+  assert.ok(skill.includes('currentFilePath'), 'ocr-plan skill must require currentFilePath');
+  assert.ok(skill.includes('Produce ONE PlanOutput JSON for the current file only'), 'ocr-plan skill must be single-file scoped');
+  assert.equal(skill.includes('covering ALL files in `context.files[]`'), false);
+  assert.equal(skill.includes('triggered by totalChangedLines >= 50'), false);
+});
+
