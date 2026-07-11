@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, rm, readFile } from 'node:fs/promises';
@@ -12,10 +13,13 @@ import {
   readComments,
   writePlan,
   readPlan,
+  writeFilePlan,
+  readFilePlan,
   appendEvent,
   markDone,
   listDone,
   writeReport,
+  safePathKey,
 } from '../store.js';
 import type { ReviewContext } from '../../model/request.js';
 import type { CommentRecord } from '../../model/comment.js';
@@ -150,6 +154,38 @@ test('writePlan + readPlan 往返', async () => {
     assert.equal(await readPlan(id), null);
     await writePlan(id, p);
     assert.deepEqual(await readPlan(id), p);
+  } finally {
+    restore();
+  }
+});
+
+test('writeFilePlan + readFilePlan stores per-file plan by safe path key', async () => {
+  const { dir, restore } = await setupTempRepo();
+  try {
+    const id = newRunId();
+    const plan: PlanOutput = {
+      change_summary: 'file summary',
+      issues: [{ severity: 'high', description: 'Fix src/a.ts race', tool_guidance: [] }],
+    };
+
+    assert.equal(await readFilePlan(id, 'src/a.ts'), null);
+    await writeFilePlan(id, 'src/a.ts', plan);
+
+    assert.deepEqual(await readFilePlan(id, 'src/a.ts'), plan);
+    const expectedPath = join(dir, '.ocr-runs', id, 'plans', `${safePathKey('src/a.ts')}.json`);
+    assert.equal(existsSync(expectedPath), true);
+  } finally {
+    restore();
+  }
+});
+
+test('readFilePlan returns null for a different path without falling back', async () => {
+  const { restore } = await setupTempRepo();
+  try {
+    const id = newRunId();
+    await writeFilePlan(id, 'src/a.ts', { change_summary: 'a', issues: [] });
+
+    assert.equal(await readFilePlan(id, 'src/b.ts'), null);
   } finally {
     restore();
   }

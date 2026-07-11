@@ -136,6 +136,22 @@ export async function readPlan<T = unknown>(runId: string): Promise<T | null> {
   }
 }
 
+export async function writeFilePlan(runId: string, path: string, plan: unknown): Promise<void> {
+  const dir = join(await resolveRunDir(runId), 'plans');
+  await ensureDir(dir);
+  await writeFile(join(dir, `${safePathKey(path)}.json`), JSON.stringify(plan, null, 2), 'utf8');
+}
+
+export async function readFilePlan<T = unknown>(runId: string, path: string): Promise<T | null> {
+  try {
+    const body = await readFile(join(await resolveRunDir(runId), 'plans', `${safePathKey(path)}.json`), 'utf8');
+    return JSON.parse(body) as T;
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    throw err;
+  }
+}
+
 export async function appendEvent(runId: string, e: object): Promise<void> {
   await appendJsonl(join(await resolveRunDir(runId), 'events.jsonl'), {
     ts: new Date().toISOString(),
