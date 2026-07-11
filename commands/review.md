@@ -78,6 +78,15 @@ Otherwise skip this step.
 
 Process `context.files[]` in bounded batches. Let `reviewConcurrency = prepareSummary.concurrency || 2`. Dispatch at most `reviewConcurrency` reviewer subagents at the same time. Do not start the next batch until every file in the current batch has either completed review or exhausted its retry attempts.
 
+For each batch, keep an in-memory table of `{ path, index, attempt, subagent, status }` for every non-skipped file in the batch. After dispatching all reviewers in the batch, explicitly wait for completion before continuing:
+
+1. A file is complete when `.ocr-runs/<runId>/done/<subagent>.json` exists and its `file` field equals that file path.
+2. Poll the batch completion state every **3 seconds** by reading `.ocr-runs/<runId>/done/` and the matching JSON files.
+3. Do not run Step 3.5, Step 3.6, or dispatch the next batch until all non-skipped files in the current batch are either `done` or have exhausted both attempts.
+4. If an Agent tool completion notification arrives, still verify the corresponding `done/<subagent>.json` marker before treating the file as complete. The marker is the source of truth, not the assistant text.
+5. If a file has no marker after a reviewer error/timeout/completion-without-marker, retry once with `reviewer-<index>-attempt-2` and update the table before waiting again.
+6. If attempt 2 also lacks a valid marker after error/timeout/completion-without-marker, mark that file `failed` and continue; `ocr-aggregate` will report it as partial (`OCRP-SUB-050/051`).
+
 **Batch cooldown:** Between batches, wait **5 seconds** before dispatching the next batch. This prevents the concurrent subagents from hitting Anthropic rate limits (HTTP 503) by spacing out API traffic across batches. If a batch had any 503 or timeout failures, extend the cooldown to **10 seconds** for that batch transition only. The stable default is `2`; when a run hits API 503s, reviewer timeouts, or many partial files, rerun with `--concurrency 1`.
 
 For each file in a batch:
@@ -119,7 +128,7 @@ For each file in a batch:
 
 ### Step 3.5 — Per-file filter (REVIEW_FILTER_TASK)
 
-After each file's reviewer subagent returns, run the filter stage for that file:
+After a file has a verified `done/<subagent>.json` marker (or after it is marked `failed` following both attempts), run the filter stage for that file before moving to the next batch:
 
 1. Read `.ocr-runs/<runId>/comments.jsonl` and select comments where `path == currentFilePath`, keeping `comment_id`.
 2. If the file has zero comments, skip filter for this file.
