@@ -59,20 +59,11 @@ If `preview == true` or `dryRun == true`:
 
 4. If there are no excluded files, write `None` below the `Excluded files` heading instead of a table.
 
-### Step 2 — Plan (only when changedLines >= 50)
+### Step 2 — Load context for per-file PLAN/review
 
-If `changedLines >= 50`:
+Read `.ocr-runs/<runId>/context.json` to load the ReviewContext.
 
-1. Read `.ocr-runs/<runId>/context.json` to load the ReviewContext.
-2. Invoke the `ocr-plan` skill with the runId. Its output should be a fenced ```json block containing PlanOutput.
-3. Parse the JSON. If parsing fails, set `planMissing = true` and continue (downgrade per OCRP-SKILL-040).
-4. If parsing succeeds, run Bash to write the plan:
-   ```bash
-   node -e "import('node:fs/promises').then(fs=>fs.writeFile('.ocr-runs/<runId>/plan.json', process.argv[1]))" '<the json string>'
-   ```
-   (Or write it via the Write tool to `.ocr-runs/<runId>/plan.json`.)
-
-Otherwise skip this step.
+Generated PLAN is not run once for the whole review. It is run per file in Step 3, matching the original OCR behavior: only files whose own changed-line count is at least `PLAN_MODE_LINE_THRESHOLD` (`50`) get generated PLAN guidance before their reviewer subagent runs.
 
 ### Step 3 — Dispatch reviewer subagents in parallel
 
@@ -93,17 +84,24 @@ For each file in a batch:
 
 0. Skip files where `skipped === true`; mention them in the final report under a "Skipped files" section with their path and skipReason. Do not dispatch a reviewer for these files.
 
-1. Compute `planGuidance` deterministically. Run:
+1. Compute this file's changed-line count as the sum of all `hunk.lines` where `kind != " "` for `currentFilePath`.
+2. If this file's changed-line count is at least `50`, run per-file generated PLAN before reviewer dispatch:
+   - Invoke the `ocr-plan` skill with exactly: `runId` and `currentFilePath`.
+   - Parse the fenced ```json PlanOutput.
+   - If parsing succeeds, write it to `.ocr-runs/<runId>/plans/<safePathKey(currentFilePath)>.json`. Use `encodeURIComponent(currentFilePath)` for `<safePathKey(currentFilePath)>`.
+   - If parsing fails, set `planMissing = true` for this file, do not write a plan file, continue review, and mention `OCRP-SKILL-040` in the final report.
+3. If this file's changed-line count is lower than `50`, skip generated PLAN for this file.
+4. Compute `planGuidance` deterministically. Run:
    ```bash
    ocr-plan-guidance --runId <runId> --path <currentFilePath>
    ```
-   Parse stdout JSON and use its `guidance` field. The returned `guidance` may include both file-specific PLAN output and repository/user custom plans guidance loaded via `--plans`, `.code-review-plans.md`, or `~/.code-review/plans.md`. If the command fails, set `planGuidance = ""` and mention `OCRP-SKILL-040` in the final report. Do not manually re-implement plan filtering in the main conversation.
-2. Compute `systemRule` from `context.files[].rulesHit[0]`:
+   Parse stdout JSON and use its `guidance` field. The returned `guidance` may include both this file's generated PLAN output and repository/user custom plans guidance loaded via `--plans`, `.code-review-plans.md`, or `~/.code-review/plans.md`. If the command fails, set `planGuidance = ""` and mention `OCRP-SKILL-040` in the final report. Do not manually re-implement plan filtering in the main conversation.
+5. Compute `systemRule` from `context.files[].rulesHit[0]`:
    - If `rulesHit[0].text` is a non-empty string, use it verbatim.
    - Else if `rulesHit[0].message` is a non-empty string, use it verbatim.
    - Else read `assets/rule_docs/<rulesHit[0].docPath>` verbatim.
    - Else use an empty string and mention `OCRP-RULES-094` in the final report.
-3. Dispatch a `ocr-reviewer` subagent with a prompt containing exactly:
+6. Dispatch a `ocr-reviewer` subagent with a prompt containing exactly:
 
    ```
    runId: <runId>
@@ -119,12 +117,12 @@ For each file in a batch:
    <planGuidance string or "">
    currentSystemDateTime: <ISO-8601>
    ```
-4. Retry reviewer dispatch exactly once for the same file when any of these happens:
+7. Retry reviewer dispatch exactly once for the same file when any of these happens:
    - the subagent errors;
    - the subagent times out;
    - the subagent returns but no matching `.ocr-runs/<runId>/done/reviewer-*.json` entry exists for that file.
    Use `reviewer-<index>-attempt-2` for the retry subagent id. Do not retry a file after `task_done` is recorded.
-5. If both attempts fail, continue to the next file and let `ocr-aggregate` report the file as partial (`OCRP-SUB-050/051`). A partial file means review did not complete for that file; it must not be described as a clean no-issue result.
+8. If both attempts fail, continue to the next file and let `ocr-aggregate` report the file as partial (`OCRP-SUB-050/051`). A partial file means review did not complete for that file; it must not be described as a clean no-issue result.
 
 ### Step 3.5 — Per-file filter (REVIEW_FILTER_TASK)
 
