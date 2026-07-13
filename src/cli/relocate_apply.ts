@@ -3,14 +3,13 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import {
   readContext,
-  readComments,
   readFilterResults,
   safePathKey,
   writeRelocationResult,
 } from '../core/runs/store.js';
 import { resolveCommentLocation } from '../core/relocation/resolve.js';
+import { readReviewComments } from '../core/orchestrator/comments.js';
 import type { ReviewContext } from '../core/model/request.js';
-import type { CommentRecord } from '../core/model/comment.js';
 import type { RelocationFileResult } from '../core/model/relocation.js';
 
 function parseFlags(argv: string[]): Record<string, string> {
@@ -52,7 +51,7 @@ async function main(): Promise<void> {
   const file = ctx.files.find((candidate) => candidate.path === f.path);
   if (!file) fail(2, `OCRP-RELOCATE-081: path is not in review context: ${f.path}`);
 
-  const comments = await readComments<CommentRecord>(f.runId);
+  const comments = await readReviewComments(f.runId);
   const filters = await readFilterResults(f.runId);
   const hiddenIds = new Set<string>();
   for (const result of filters.results) {
