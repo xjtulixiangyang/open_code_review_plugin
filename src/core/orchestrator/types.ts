@@ -146,15 +146,6 @@ export interface AttemptCredentials {
   diffFingerprint: string;
 }
 
-export interface CodeCommentInput {
-  taskId: string;
-  attemptId: string;
-  leaseToken: string;
-  filePath: string;
-  diffFingerprint: string;
-  comment: unknown;
-}
-
 export interface AuditEvent {
   schemaVersion: 1;
   eventId: string;

@@ -1,8 +1,8 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdir, rm, writeFile, readFile, readdir } from 'node:fs/promises';
+import { mkdir, rm, writeFile, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { randomUUID, createHash } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { Orchestrator } from '../orchestrator.js';
 import type { RunRecord, TaskRecord, AttemptRecord, ReviewManifest, ManifestFile } from '../types.js';
 import type { AttemptCredentials } from '../types.js';

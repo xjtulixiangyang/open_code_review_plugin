@@ -5,7 +5,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { randomUUID, createHash } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { Orchestrator } from '../../core/orchestrator/orchestrator.js';
 import type { RunRecord, TaskRecord, AttemptRecord, ReviewManifest, ManifestFile } from '../../core/orchestrator/types.js';
 import { ORCHESTRATOR_SCHEMA_VERSION } from '../../core/orchestrator/types.js';
