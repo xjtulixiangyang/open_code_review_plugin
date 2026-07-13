@@ -235,6 +235,22 @@ describe('Orchestrator claim and dispatch', () => {
       await cleanup(runDir);
     });
 
+    it('does not exceed capacity across repeated claims while leases are live', async () => {
+      const runDir = await tmpDir();
+      await createRunDir(runDir, 4);
+      const orchestrator = new Orchestrator(runDir);
+
+      const first = await orchestrator.claim(2);
+      assert.equal(first.length, 2);
+      const second = await orchestrator.claim(2);
+      assert.deepEqual(second, []);
+
+      const status = await orchestrator.status();
+      assert.equal(status.taskCounts.leased, 2);
+      assert.equal(status.taskCounts.queued, 2);
+      await cleanup(runDir);
+    });
+
     it('returns empty array when no queued tasks remain', async () => {
       const runDir = await tmpDir();
       await createRunDir(runDir, 2, { taskState: 'succeeded' });

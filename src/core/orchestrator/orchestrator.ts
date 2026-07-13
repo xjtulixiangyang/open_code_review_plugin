@@ -212,8 +212,10 @@ export class Orchestrator {
     const queued = tasks
       .filter((t) => t.state === 'queued')
       .sort((a, b) => a.manifestIndex - b.manifestIndex);
+    const occupied = tasks.filter((t) => t.state === 'leased' || t.state === 'running').length;
+    const available = Math.max(0, capacity - occupied);
 
-    const toClaim = queued.slice(0, capacity);
+    const toClaim = queued.slice(0, available);
     if (toClaim.length === 0) {
       // Emit rejection event
       await this.emitAuditEventLocked({
