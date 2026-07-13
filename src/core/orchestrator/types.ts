@@ -2,6 +2,22 @@ export const ORCHESTRATOR_SCHEMA_VERSION = 1;
 export const DEFAULT_LEASE_DURATION_MS = 900_000;
 export const DEFAULT_MAX_ATTEMPTS = 2;
 
+/**
+ * Predicate to distinguish a task record filename from an attempt record
+ * filename in the tasks/ directory.
+ *
+ * Task records follow the pattern `<taskId>.json` (e.g. `task-0.json`).
+ * Attempt records follow the pattern `<taskId>.<attemptId>.json` (e.g.
+ * `task-0.attempt-uuid.json`).  The distinguishing feature is that a task
+ * record's stem (filename minus `.json`) contains no dot, while an attempt
+ * record's stem contains at least one dot.
+ */
+export function isTaskFilename(name: string): boolean {
+  if (!name.endsWith('.json')) return false;
+  const stem = name.slice(0, -5); // remove '.json'
+  return !stem.includes('.');
+}
+
 export type RunState = 'active' | 'completed' | 'failed' | 'superseded';
 export type TaskState = 'queued' | 'leased' | 'running' | 'succeeded' | 'failed';
 export type AttemptState = 'leased' | 'running' | 'succeeded' | 'failed' | 'expired';

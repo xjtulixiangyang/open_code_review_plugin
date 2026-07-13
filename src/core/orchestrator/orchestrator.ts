@@ -14,7 +14,7 @@ import type {
   RunState,
   AuditEvent,
 } from './types.js';
-import { ORCHESTRATOR_SCHEMA_VERSION, DEFAULT_MAX_ATTEMPTS } from './types.js';
+import { ORCHESTRATOR_SCHEMA_VERSION, DEFAULT_MAX_ATTEMPTS, isTaskFilename } from './types.js';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -34,8 +34,20 @@ const AUDIT_FILE = 'audit.jsonl';
  * All public methods acquire the run lock to ensure mutual exclusion.
  * Internal `*Locked` methods operate under the assumption the lock is held.
  */
+export interface OrchestratorOptions {
+  now?: () => Date;
+}
+
 export class Orchestrator {
-  constructor(readonly runDir: string) {}
+  private readonly _now: () => Date;
+
+  constructor(readonly runDir: string, options?: OrchestratorOptions) {
+    this._now = options?.now ?? (() => new Date());
+  }
+
+  private now(): Date {
+    return this._now();
+  }
 
   // -----------------------------------------------------------------------
   // Public API (locked)
@@ -84,6 +96,52 @@ export class Orchestrator {
     });
   }
 
+  /**
+   * Reconcile lease deadlines — expire any leased or running tasks whose
+   * lease deadline has passed, then recompute run state.
+   *
+   * Idempotent: calling multiple times with no clock change produces the
+   * same result.
+   */
+  reconcile(): Promise<ReconcileResult> {
+    return withRunLock(this.runDir, async () => {
+      for (const task of await this.listTasksLocked()) {
+        if (
+          (task.state === 'leased' || task.state === 'running') &&
+          task.currentAttemptId
+        ) {
+          const attempt = await this.readAttemptLocked(
+            task.taskId,
+            task.currentAttemptId,
+          );
+          if (
+            attempt &&
+            Date.parse(attempt.leaseDeadline) <= this.now().getTime()
+          ) {
+            await this.failAttemptLocked(
+              task.taskId,
+              task.currentAttemptId,
+              'lease_expired',
+            );
+          }
+        }
+      }
+      return this.recomputeRunLocked();
+    });
+  }
+
+  /**
+   * Return the current run state without expiring any leases.
+   *
+   * Acquires the lock to ensure a consistent read, then recomputes run
+   * state from task records. Does NOT mutate any task or attempt records.
+   */
+  status(): Promise<ReconcileResult> {
+    return withRunLock(this.runDir, async () => {
+      return this.recomputeRunLocked();
+    });
+  }
+
   // -----------------------------------------------------------------------
   // Locked internals
   // -----------------------------------------------------------------------
@@ -113,14 +171,14 @@ export class Orchestrator {
     }
 
     const results: ClaimResult[] = [];
-    const now = new Date().toISOString();
+    const now = this.now().toISOString();
 
     for (const task of toClaim) {
       const attemptId = `attempt-${randomUUID()}`;
       const leaseToken = randomBytes(32).toString('base64url');
       const leaseTokenDigest = sha256(leaseToken);
       const leaseDeadline = new Date(
-        Date.now() + 900_000,
+        this.now().getTime() + 900_000,
       ).toISOString(); // 15 min default
 
       // Update task record
@@ -185,7 +243,7 @@ export class Orchestrator {
       );
     }
 
-    const now = new Date().toISOString();
+    const now = this.now().toISOString();
     task.state = 'running';
     // currentAttemptId is preserved (still points to the accepted attempt)
     // acceptedAttemptId is NOT set here — that field is for successful completion (Task 7)
@@ -211,15 +269,24 @@ export class Orchestrator {
   private async failAttemptLocked(
     taskId: string,
     attemptId: string,
-    reason: 'dispatch_failure',
+    reason: 'dispatch_failure' | 'lease_expired',
   ): Promise<void> {
     const task = await this.readTaskLocked(taskId);
     if (!task) {
       throw new Error(`Task not found: ${taskId}`);
     }
-    if (task.state !== 'leased') {
+    if (reason === 'dispatch_failure' && task.state !== 'leased') {
       throw new Error(
         `Task ${taskId} is not in leased state (state=${task.state})`,
+      );
+    }
+    if (
+      reason === 'lease_expired' &&
+      task.state !== 'leased' &&
+      task.state !== 'running'
+    ) {
+      throw new Error(
+        `Task ${taskId} is not in leased or running state (state=${task.state})`,
       );
     }
     if (task.currentAttemptId !== attemptId) {
@@ -228,12 +295,12 @@ export class Orchestrator {
       );
     }
 
-    const now = new Date().toISOString();
+    const now = this.now().toISOString();
 
     // Update attempt record
     const attempt = await this.readAttemptLocked(taskId, attemptId);
     if (attempt) {
-      attempt.state = 'failed';
+      attempt.state = reason === 'lease_expired' ? 'expired' : 'failed';
       attempt.failureReason = reason;
       attempt.updatedAt = now;
       await this.writeAttemptLocked(attempt);
@@ -263,20 +330,22 @@ export class Orchestrator {
       task.state = 'queued';
       await this.writeTaskLocked(task);
 
-      await this.emitAuditEventLocked({
-        type: 'dispatch.failed',
-        runId: task.runId,
-        taskId: task.taskId,
-        attemptId,
-        reason: 'dispatch_failure',
-      });
+      if (reason === 'dispatch_failure') {
+        await this.emitAuditEventLocked({
+          type: 'dispatch.failed',
+          runId: task.runId,
+          taskId: task.taskId,
+          attemptId,
+          reason: 'dispatch_failure',
+        });
+      }
 
       await this.emitAuditEventLocked({
         type: 'task.retry',
         runId: task.runId,
         taskId: task.taskId,
         attemptId,
-        reason: 'dispatch_failure',
+        reason,
         data: { attemptsUsed: task.attemptsUsed, maxAttempts: task.maxAttempts },
       });
     }
@@ -299,7 +368,7 @@ export class Orchestrator {
     }
     const tasks: TaskRecord[] = [];
     for (const name of names) {
-      if (!name.endsWith('.json')) continue;
+      if (!isTaskFilename(name)) continue;
       try {
         const task = await readJson<TaskRecord>(join(tasksDir, name));
         tasks.push(task);
@@ -332,11 +401,35 @@ export class Orchestrator {
       state = 'active';
     }
 
+    // Compute next lease deadline: earliest lease deadline among live
+    // (non-expired) leased/running tasks
+    let nextLeaseDeadline: string | undefined;
+    for (const task of tasks) {
+      if (
+        (task.state === 'leased' || task.state === 'running') &&
+        task.currentAttemptId
+      ) {
+        const attempt = await this.readAttemptLocked(
+          task.taskId,
+          task.currentAttemptId,
+        );
+        if (attempt) {
+          const deadline = attempt.leaseDeadline;
+          if (
+            nextLeaseDeadline === undefined ||
+            deadline < nextLeaseDeadline
+          ) {
+            nextLeaseDeadline = deadline;
+          }
+        }
+      }
+    }
+
     // Update run record
     const runRecord = await this.readRunRecordLocked();
     if (runRecord) {
       runRecord.state = state;
-      runRecord.updatedAt = new Date().toISOString();
+      runRecord.updatedAt = this.now().toISOString();
       if (state === 'completed' || state === 'failed') {
         runRecord.completedAt = runRecord.updatedAt;
       }
@@ -348,7 +441,7 @@ export class Orchestrator {
       state,
       taskCounts,
       canClaim: taskCounts.queued > 0,
-      nextLeaseDeadline: undefined,
+      nextLeaseDeadline,
       strictAggregationAllowed: state === 'completed',
     };
   }
@@ -447,7 +540,7 @@ export class Orchestrator {
     const event: AuditEvent = {
       schemaVersion: ORCHESTRATOR_SCHEMA_VERSION,
       eventId: randomUUID(),
-      ts: new Date().toISOString(),
+      ts: this.now().toISOString(),
       ...partial,
     };
     await appendAuditEvent(join(this.runDir, AUDIT_FILE), event);

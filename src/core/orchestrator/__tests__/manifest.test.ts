@@ -573,9 +573,92 @@ test('startCandidate returns the compatible active run instead of the candidate'
       candidateRunId: 'candidate-b',
       effectiveRunId: 'active-a',
       resumed: true,
-      state: 'active',
+      // After reconcile, the run is completed since all tasks are terminal
+      state: 'completed',
       taskCounts: { queued: 0, leased: 0, running: 0, succeeded: 1, failed: 0 },
+      nextLeaseDeadline: undefined,
     });
+  } finally {
+    process.chdir(previous);
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// readAllTasks — attempt file filtering
+// ---------------------------------------------------------------------------
+
+test('readAllTasks ignores attempt-shaped files in tasks directory', async () => {
+  const root = await tmpDir();
+  const previous = process.cwd();
+  process.chdir(root);
+  try {
+    await initGitRepo(root);
+
+    const runADir = join(root, '.ocr-runs', 'active-a');
+    await mkdir(runADir, { recursive: true });
+    const ctxA = makeContext(root, { runId: 'active-a' });
+    await writeFile(join(runADir, 'context.json'), JSON.stringify(ctxA, null, 2), 'utf8');
+    await writeFile(join(runADir, 'launch.json'), JSON.stringify(makeLaunchConfig(), null, 2), 'utf8');
+
+    const repoId = await repositoryIdentity(root);
+    const manifestA = buildManifest(ctxA, makeLaunchConfig(), 'active-a', repoId);
+    await writeManifest(runADir, manifestA);
+    await writeRunRecord(runADir, {
+      schemaVersion: 1,
+      runId: 'active-a',
+      state: 'active',
+      manifestDigest: manifestDigest(manifestA),
+      repoIdentity: repoId,
+      argsFingerprint: manifestA.argsFingerprint,
+      diffFingerprint: manifestA.diffFingerprint,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+
+    // Write one real task
+    await writeTasksDir(runADir, [{
+      runId: 'active-a',
+      taskId: 'task-0',
+      manifestIndex: 0,
+      filePath: 'src/a.ts',
+      diffFingerprint: manifestA.files[0].diffFingerprint,
+      state: 'queued',
+      attemptsUsed: 0,
+      maxAttempts: 2,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    }]);
+
+    // Place an attempt-shaped file (taskId.attemptId.json) in the tasks dir
+    const tasksDir = join(runADir, 'tasks');
+    const attemptFile = join(tasksDir, 'task-0.attempt-abc123.json');
+    await writeFile(attemptFile, JSON.stringify({
+      runId: 'active-a',
+      taskId: 'task-0',
+      attemptId: 'attempt-abc123',
+      state: 'leased',
+      leaseTokenDigest: 'a'.repeat(64),
+      leaseDeadline: new Date().toISOString(),
+      stagedCommentCount: 0,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    }), 'utf8');
+
+    // selectEffectiveRun calls readAllTasks internally
+    const candidateDir = join(root, '.ocr-runs', 'candidate-b');
+    await mkdir(candidateDir, { recursive: true });
+    const ctxB = makeContext(root, { runId: 'candidate-b' });
+    await writeFile(join(candidateDir, 'context.json'), JSON.stringify(ctxB, null, 2), 'utf8');
+    await writeFile(join(candidateDir, 'launch.json'), JSON.stringify(makeLaunchConfig(), null, 2), 'utf8');
+
+    const manifestB = buildManifest(ctxB, makeLaunchConfig(), 'candidate-b', repoId);
+    const result = await selectEffectiveRun('candidate-b', manifestB, root);
+
+    // Should have resumed with exactly 1 queued task (the attempt file is ignored)
+    assert.equal(result.resumed, true);
+    assert.equal(result.effectiveRunId, 'active-a');
+    assert.deepEqual(result.taskCounts, { queued: 1, leased: 0, running: 0, succeeded: 0, failed: 0 });
   } finally {
     process.chdir(previous);
     await rm(root, { recursive: true, force: true });

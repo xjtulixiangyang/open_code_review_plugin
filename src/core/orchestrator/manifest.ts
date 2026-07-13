@@ -2,11 +2,12 @@ import { mkdir, readFile, readdir } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
 import type { ReviewContext } from '../model/request.js';
 import type { ReviewManifest, RunRecord, TaskRecord, TaskCounts, RunState } from './types.js';
-import { ORCHESTRATOR_SCHEMA_VERSION } from './types.js';
+import { ORCHESTRATOR_SCHEMA_VERSION, isTaskFilename } from './types.js';
 import { manifestDigest, buildManifest as buildFingerprintManifest, repositoryIdentity } from './fingerprint.js';
 import { atomicWriteJson, readJson } from './storage.js';
 import { resolveExistingRunDir, listRunDirsNear, readContext, readLaunchConfig } from '../runs/store.js';
 import { withRunLock } from './lock.js';
+import { Orchestrator } from './orchestrator.js';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -55,7 +56,7 @@ async function readAllTasks(runDir: string): Promise<TaskRecord[]> {
   }
   const tasks: TaskRecord[] = [];
   for (const name of names) {
-    if (!name.endsWith('.json')) continue;
+    if (!isTaskFilename(name)) continue;
     try {
       const task = await readJson<TaskRecord>(join(tasksDir, name));
       tasks.push(task);
@@ -293,6 +294,7 @@ export interface StartCandidateResult {
   resumed: boolean;
   state: RunState;
   taskCounts: TaskCounts;
+  nextLeaseDeadline?: string;
 }
 
 /**
@@ -317,11 +319,25 @@ export async function startCandidate(candidateRunId: string): Promise<StartCandi
   // Select effective run
   const result = await selectEffectiveRun(candidateRunId, candidateManifest, context.repoRoot);
 
+  // If resuming, reconcile leases on the effective run so stale leases are
+  // expired before returning. The Orchestrator is constructed on the effective
+  // run directory and reconcile() acquires its own lock (no nested lock issue
+  // since we are outside any withRunLock scope).
+  let reconcileResult: Awaited<ReturnType<Orchestrator['reconcile']>> | undefined;
+  if (result.resumed) {
+    const effectiveRunDir = await resolveExistingRunDir(result.effectiveRunId);
+    if (effectiveRunDir) {
+      const orchestrator = new Orchestrator(effectiveRunDir);
+      reconcileResult = await orchestrator.reconcile();
+    }
+  }
+
   return {
     candidateRunId,
     effectiveRunId: result.effectiveRunId,
     resumed: result.resumed,
-    state: result.state,
-    taskCounts: result.taskCounts,
+    state: reconcileResult?.state ?? result.state,
+    taskCounts: reconcileResult?.taskCounts ?? result.taskCounts,
+    nextLeaseDeadline: reconcileResult?.nextLeaseDeadline,
   };
 }

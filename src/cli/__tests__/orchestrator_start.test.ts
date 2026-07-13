@@ -198,8 +198,11 @@ test('orchestrator_start CLI resumes compatible active run', async () => {
     assert.equal(result.candidateRunId, 'candidate-b');
     assert.equal(result.effectiveRunId, 'active-a');
     assert.equal(result.resumed, true);
-    assert.equal(result.state, 'active');
+    // After reconcile, the run is completed since all tasks are terminal
+    assert.equal(result.state, 'completed');
     assert.deepEqual(result.taskCounts, { queued: 0, leased: 0, running: 0, succeeded: 1, failed: 0 });
+    // No live leases, so nextLeaseDeadline should be undefined
+    assert.equal(result.nextLeaseDeadline, undefined);
   } finally {
     process.chdir(previous);
     await rm(root, { recursive: true, force: true });
