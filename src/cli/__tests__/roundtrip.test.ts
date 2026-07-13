@@ -71,22 +71,23 @@ test('CLI tools write comments, done markers, file diffs, and aggregate reports'
 
     await runCli(dir, 'code_comment.ts', [
       '--runId', 'run1',
-      '--args', JSON.stringify({
-        path: 'src/a.ts',
-        subagent: 'reviewer-0',
-        comments: [{ start_line: 1, end_line: 1, content: 'Use a clearer value' }],
-      }),
+      '--path', 'src/a.ts',
+      '--start', '1',
+      '--end', '1',
+      '--content', 'Use a clearer value',
+      '--subagent', 'reviewer-0',
     ]);
     await runCli(dir, 'task_done.ts', [
       '--runId', 'run1',
-      '--args', JSON.stringify({ subagent: 'reviewer-0', file: 'src/a.ts' }),
+      '--subagent', 'reviewer-0',
+      '--file', 'src/a.ts',
     ]);
 
     const diff = await runCli(dir, 'file_read_diff.ts', [
       '--runId', 'run1',
-      '--args', JSON.stringify({ path_array: ['src/b.ts'] }),
+      '--path', 'src/b.ts',
     ]);
-    assert.match(diff.stdout, /==== FILE: src\/b\.ts ====/);
+    assert.match(diff.stdout, /export const b = 2/);
 
     const read = await runCli(dir, 'file_read.ts', [
       '--runId', 'run1',
