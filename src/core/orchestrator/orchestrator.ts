@@ -13,6 +13,8 @@ import type {
   TaskCounts,
   RunState,
   AuditEvent,
+  CompletionSubmission,
+  CompletionOutcome,
 } from './types.js';
 import type { CommentRecord } from '../model/comment.js';
 import type { AttemptCredentials } from './types.js';
@@ -157,6 +159,24 @@ export class Orchestrator {
   stageComments(credentials: AttemptCredentials, records: CommentRecord[]): Promise<string[]> {
     return withRunLock(this.runDir, () =>
       this.stageCommentsLocked(credentials, records),
+    );
+  }
+
+  /**
+   * Accept a structured, idempotent completion submission.
+   *
+   * Under the run lock, first reads the task and accepted attempt. If the
+   * task already succeeded and the accepted attempt has the same completion
+   * digest, returns idempotent success even though the run may now be
+   * completed. If a completion digest exists but differs, rejects.
+   *
+   * Otherwise validates active/current/running credentials and
+   * outcome/comment-count consistency, writes attempt success, then task
+   * success, and derives run terminal state from all tasks.
+   */
+  acceptCompletion(submission: CompletionSubmission): Promise<{ accepted: true; idempotent: boolean }> {
+    return withRunLock(this.runDir, () =>
+      this.acceptCompletionLocked(submission),
     );
   }
 
@@ -366,6 +386,185 @@ export class Orchestrator {
         reason,
         data: { attemptsUsed: task.attemptsUsed, maxAttempts: task.maxAttempts },
       });
+    }
+  }
+
+  // -----------------------------------------------------------------------
+  // Completion
+  // -----------------------------------------------------------------------
+
+  private async acceptCompletionLocked(
+    submission: CompletionSubmission,
+  ): Promise<{ accepted: true; idempotent: boolean }> {
+    const { runId, taskId, attemptId, leaseToken, filePath, diffFingerprint, outcome, summary } = submission;
+
+    // 0. Validate submission fields
+    const VALID_OUTCOMES: ReadonlySet<string> = new Set(['findings', 'no_findings']);
+    if (!VALID_OUTCOMES.has(outcome)) {
+      throw new Error(
+        `[OCRP-ORCH-INVALID-COMPLETION] Invalid outcome "${outcome}": must be "findings" or "no_findings"`,
+      );
+    }
+    if (summary.length === 0) {
+      throw new Error('[OCRP-ORCH-INVALID-COMPLETION] Summary must not be empty');
+    }
+    const MAX_SUMMARY_CODEPOINTS = 500;
+    if ([...summary].length > MAX_SUMMARY_CODEPOINTS) {
+      throw new Error(
+        `[OCRP-ORCH-INVALID-COMPLETION] Summary exceeds ${MAX_SUMMARY_CODEPOINTS} Unicode code points`,
+      );
+    }
+
+    // 1. Read task record (before run check for idempotency)
+    const task = await this.readTaskLocked(taskId);
+    if (!task) {
+      throw new Error(`[OCRP-ORCH-INVALID-COMPLETION] Task ${taskId} not found`);
+    }
+
+    // 2. Compute completion digest from submission
+    const tokenDigest = createHash('sha256').update(leaseToken).digest('hex');
+    const digestPayload: Record<string, string> = {
+      runId,
+      taskId,
+      attemptId,
+      tokenDigest,
+      filePath,
+      diffFingerprint,
+      outcome,
+      summary,
+    };
+    const completionDigest = createHash('sha256')
+      .update(JSON.stringify(digestPayload, Object.keys(digestPayload).sort()))
+      .digest('hex');
+
+    // 3. Idempotency check BEFORE active/current checks: if task already
+    //    succeeded and accepted attempt has the same completion digest,
+    //    return idempotent success even if the run is now completed.
+    if (task.state === 'succeeded' && task.acceptedAttemptId) {
+      const acceptedAttempt = await this.readAttemptLocked(taskId, task.acceptedAttemptId);
+      if (acceptedAttempt && acceptedAttempt.completionDigest) {
+        if (acceptedAttempt.completionDigest === completionDigest) {
+          return { accepted: true, idempotent: true };
+        }
+        // Conflicting digest — different completion for same task
+        throw new Error(
+          `[OCRP-ORCH-INVALID-COMPLETION] Task ${taskId} already completed with different completion digest`,
+        );
+      }
+    }
+
+    // 4. Read run record — validate active (after idempotency check)
+    const runRecord = await this.readRunRecordLocked();
+    if (!runRecord || runRecord.state !== 'active') {
+      throw new Error(
+        `[OCRP-ORCH-INVALID-COMPLETION] Run is not active (state=${runRecord?.state ?? 'missing'})`,
+      );
+    }
+
+    // 5. Validate task is running
+    if (task.state !== 'running') {
+      throw new Error(
+        `[OCRP-ORCH-INVALID-COMPLETION] Task ${taskId} is not running (state=${task.state})`,
+      );
+    }
+
+    // 6. Validate attempt ID matches task.currentAttemptId
+    if (attemptId !== task.currentAttemptId) {
+      throw new Error(
+        `[OCRP-ORCH-INVALID-COMPLETION] Attempt ID mismatch: ${attemptId} !== ${task.currentAttemptId}`,
+      );
+    }
+
+    // 7. Validate file path matches task.filePath
+    if (filePath !== task.filePath) {
+      throw new Error(
+        `[OCRP-ORCH-INVALID-COMPLETION] File path mismatch: ${filePath} !== ${task.filePath}`,
+      );
+    }
+
+    // 8. Validate diff fingerprint matches task.diffFingerprint
+    if (diffFingerprint !== task.diffFingerprint) {
+      throw new Error(
+        `[OCRP-ORCH-INVALID-COMPLETION] Diff fingerprint mismatch: ${diffFingerprint} !== ${task.diffFingerprint}`,
+      );
+    }
+
+    // 9. Read attempt record
+    const attempt = await this.readAttemptLocked(taskId, attemptId);
+    if (!attempt) {
+      throw new Error(
+        `[OCRP-ORCH-INVALID-COMPLETION] Attempt ${attemptId} not found for task ${taskId}`,
+      );
+    }
+
+    // 10. Validate lease token SHA-256 digest matches attempt.leaseTokenDigest
+    if (tokenDigest !== attempt.leaseTokenDigest) {
+      throw new Error(`[OCRP-ORCH-INVALID-COMPLETION] Lease token digest mismatch`);
+    }
+
+    // 11. Validate lease not expired
+    if (Date.parse(attempt.leaseDeadline) <= this.now().getTime()) {
+      throw new Error(`[OCRP-ORCH-INVALID-COMPLETION] Lease has expired`);
+    }
+
+    // 12. Validate outcome/comment-count consistency
+    const actualCommentCount = await this.countStagedCommentsLocked(attemptId);
+    if (outcome === 'findings' && actualCommentCount === 0) {
+      throw new Error(
+        `[OCRP-ORCH-INVALID-COMPLETION] Outcome "findings" requires at least 1 staged comment, but found 0`,
+      );
+    }
+    if (outcome === 'no_findings' && actualCommentCount > 0) {
+      throw new Error(
+        `[OCRP-ORCH-INVALID-COMPLETION] Outcome "no_findings" requires 0 staged comments, but found ${actualCommentCount}`,
+      );
+    }
+
+    const now = this.now().toISOString();
+
+    // 13. Write attempt success
+    attempt.state = 'succeeded';
+    attempt.outcome = outcome;
+    attempt.summary = summary;
+    attempt.completionDigest = completionDigest;
+    attempt.updatedAt = now;
+    await this.writeAttemptLocked(attempt);
+
+    // 14. Write task success
+    task.state = 'succeeded';
+    task.acceptedAttemptId = attemptId;
+    task.currentAttemptId = undefined;
+    task.updatedAt = now;
+    await this.writeTaskLocked(task);
+
+    // 15. Derive run terminal state from all tasks
+    await this.recomputeRunLocked();
+
+    // 16. Emit audit event
+    await this.emitAuditEventLocked({
+      type: 'task.completed',
+      runId,
+      taskId,
+      attemptId,
+      data: { outcome, summary, completionDigest },
+    });
+
+    return { accepted: true, idempotent: false };
+  }
+
+  /**
+   * Count staged comments for an attempt by reading the JSONL file.
+   */
+  private async countStagedCommentsLocked(attemptId: string): Promise<number> {
+    const commentsPath = join(this.runDir, 'attempt-comments', `${attemptId}.jsonl`);
+    try {
+      const content = await readFile(commentsPath, 'utf-8');
+      return content.split('\n').filter((l) => l.trim().length > 0).length;
+    } catch (err: unknown) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+        return 0;
+      }
+      throw err;
     }
   }
 
