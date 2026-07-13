@@ -18,6 +18,28 @@ async function runPrepare(cwd: string, args: string[]) {
   });
 }
 
+test('ocr-prepare excludes .ocr-runs runtime artifacts from workspace review', async () => {
+  const repo = await mkdtemp(join(tmpdir(), 'ocrp-prepare-artifacts-'));
+  try {
+    await execFileAsync('git', ['init'], { cwd: repo });
+    await execFileAsync('git', ['config', 'user.email', 'test@test'], { cwd: repo });
+    await execFileAsync('git', ['config', 'user.name', 'Test'], { cwd: repo });
+    await writeFile(join(repo, 'a.ts'), 'export const a = 1;\n');
+    await execFileAsync('git', ['add', 'a.ts'], { cwd: repo });
+    await execFileAsync('git', ['commit', '-m', 'init'], { cwd: repo });
+    await writeFile(join(repo, 'a.ts'), 'export const a = 2;\n');
+    const first = JSON.parse((await runPrepare(repo, [])).stdout);
+    const second = JSON.parse((await runPrepare(repo, [])).stdout);
+    const context = JSON.parse(await readFile(join(repo, second.contextPath), 'utf8'));
+    assert.equal(first.fileCount, 1);
+    assert.equal(second.fileCount, 1);
+    assert.deepEqual(context.files.map((file: { path: string }) => file.path), ['a.ts']);
+    assert.ok(context.excludedFiles.some((file: { path: string }) => file.path.startsWith('.ocr-runs/')));
+  } finally {
+    await rm(repo, { recursive: true, force: true });
+  }
+});
+
 test('ocr-prepare accepts --rules and stores rulesPath', async () => {
   const repo = await mkdtemp(join(tmpdir(), 'ocrp-prepare-'));
   try {

@@ -2,7 +2,7 @@
 /**
  * orchestrator_start — CLI entry point for starting a review orchestration run.
  *
- * Usage: node orchestrator_start.ts <candidateRunId>
+ * Usage: node orchestrator_start.ts --runId <candidateRunId>
  *
  * Reads the candidate's context.json and launch.json, computes fingerprints,
  * selects the effective run (resume or new), writes immutable manifest, and
@@ -12,10 +12,12 @@
 import { startCandidate } from '../core/orchestrator/manifest.js';
 
 async function main(): Promise<void> {
-  const candidateRunId = process.argv[2];
+  const argv = process.argv.slice(2);
+  const runIdIndex = argv.indexOf('--runId');
+  const candidateRunId = runIdIndex >= 0 ? argv[runIdIndex + 1] : (argv[0]?.startsWith('--') ? undefined : argv[0]);
   if (!candidateRunId) {
-    console.error('Usage: orchestrator_start <candidateRunId>');
-    process.exit(1);
+    console.error('[orchestrator_start] missing --runId');
+    process.exit(2);
   }
 
   try {
@@ -28,7 +30,7 @@ async function main(): Promise<void> {
         candidateRunId,
       }),
     );
-    process.exit(1);
+    process.exit(2);
   }
 }
 
