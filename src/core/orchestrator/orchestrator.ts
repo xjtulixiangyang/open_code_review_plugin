@@ -588,14 +588,82 @@ export class Orchestrator {
   // Read accepted comments (for aggregate CLI)
   // -----------------------------------------------------------------------
 
+  /**
+   * Strict task reader that propagates parse errors instead of silently
+   * skipping corrupt task files. Used by readAcceptedCommentsLocked for
+   * fail-closed aggregation.
+   */
+  private async readTasksStrictLocked(): Promise<TaskRecord[]> {
+    const tasksDir = join(this.runDir, TASKS_DIR);
+    let names: string[];
+    try {
+      names = await readdir(tasksDir);
+    } catch {
+      return [];
+    }
+    const tasks: TaskRecord[] = [];
+    for (const name of names) {
+      if (!isTaskFilename(name)) continue;
+      // Propagates parse errors (fail-closed)
+      const task = await readJson<TaskRecord>(join(tasksDir, name));
+      tasks.push(task);
+    }
+    return tasks;
+  }
+
   private async readAcceptedCommentsLocked(): Promise<{ comments: CommentRecord[]; partialFiles: string[] }> {
-    const tasks = await this.listTasksLocked();
+    const tasks = await this.readTasksStrictLocked();
     const comments: CommentRecord[] = [];
     const partialFiles: string[] = [];
 
     for (const task of tasks) {
-      if (task.state === 'succeeded' && task.acceptedAttemptId) {
-        const attemptComments = await this.readAttemptCommentsFileLocked(task.acceptedAttemptId);
+      if (task.state === 'succeeded') {
+        // Missing acceptedAttemptId is corrupt
+        if (!task.acceptedAttemptId) {
+          throw new Error(
+            `Corrupt task ${task.taskId}: state is succeeded but acceptedAttemptId is missing`,
+          );
+        }
+
+        // Load the accepted AttemptRecord
+        const attempt = await this.readAttemptLocked(task.taskId, task.acceptedAttemptId);
+        if (!attempt) {
+          throw new Error(
+            `Corrupt task ${task.taskId}: accepted attempt ${task.acceptedAttemptId} not found`,
+          );
+        }
+
+        // Validate attempt cross-references
+        if (attempt.taskId !== task.taskId) {
+          throw new Error(
+            `Corrupt attempt ${attempt.attemptId}: taskId mismatch (expected ${task.taskId}, got ${attempt.taskId})`,
+          );
+        }
+        if (attempt.runId !== task.runId) {
+          throw new Error(
+            `Corrupt attempt ${attempt.attemptId}: runId mismatch (expected ${task.runId}, got ${attempt.runId})`,
+          );
+        }
+
+        // Validate attempt state and outcome
+        if (attempt.state !== 'succeeded') {
+          throw new Error(
+            `Corrupt attempt ${attempt.attemptId}: expected state succeeded, got ${attempt.state}`,
+          );
+        }
+        if (!attempt.outcome) {
+          throw new Error(
+            `Corrupt attempt ${attempt.attemptId}: outcome is missing`,
+          );
+        }
+
+        // Read and validate comments
+        const attemptComments = await this.readAttemptCommentsFileLocked(
+          task.taskId,
+          task.filePath,
+          task.acceptedAttemptId,
+          attempt,
+        );
         comments.push(...attemptComments);
       } else if (task.state === 'failed') {
         partialFiles.push(task.filePath);
@@ -605,24 +673,77 @@ export class Orchestrator {
     return { comments, partialFiles };
   }
 
-  private async readAttemptCommentsFileLocked(attemptId: string): Promise<CommentRecord[]> {
+  /**
+   * Read and validate attempt comments JSONL.
+   *
+   * Validates: file existence vs stagedCommentCount/outcome, line count
+   * matches stagedCommentCount, outcome/comment-count consistency, each
+   * parsed CommentRecord path matches the task filePath, and no malformed
+   * JSONL lines.
+   *
+   * ENOENT is allowed only when stagedCommentCount === 0 and outcome is
+   * 'no_findings'; otherwise fails closed.
+   */
+  private async readAttemptCommentsFileLocked(
+    taskId: string,
+    expectedPath: string,
+    attemptId: string,
+    attempt: AttemptRecord,
+  ): Promise<CommentRecord[]> {
     const commentsPath = join(this.runDir, 'attempt-comments', `${attemptId}.jsonl`);
+    let content: string;
     try {
-      const content = await readFile(commentsPath, 'utf-8');
-      const lines = content.split('\n').filter((l) => l.trim().length > 0);
-      return lines.map((l) => {
-        try {
-          return JSON.parse(l) as CommentRecord;
-        } catch {
-          throw new Error(`Malformed JSONL in attempt-comments/${attemptId}.jsonl`);
-        }
-      });
+      content = await readFile(commentsPath, 'utf-8');
     } catch (err: unknown) {
       if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
-        return [];
+        // ENOENT allowed only when stagedCommentCount === 0 and outcome is no_findings
+        if (attempt.stagedCommentCount === 0 && attempt.outcome === 'no_findings') {
+          return [];
+        }
+        throw new Error(
+          `Missing attempt-comments/${attemptId}.jsonl: stagedCommentCount=${attempt.stagedCommentCount}, outcome=${attempt.outcome}`,
+        );
       }
       throw err;
     }
+
+    const lines = content.split('\n').filter((l) => l.trim().length > 0);
+
+    // Validate parsed line count equals attempt.stagedCommentCount
+    if (lines.length !== attempt.stagedCommentCount) {
+      throw new Error(
+        `Comment count mismatch for attempt ${attemptId}: file has ${lines.length} lines, but attempt.stagedCommentCount=${attempt.stagedCommentCount}`,
+      );
+    }
+
+    // Validate outcome/comment-count consistency
+    if (attempt.outcome === 'findings' && lines.length === 0) {
+      throw new Error(
+        `Outcome "findings" for attempt ${attemptId} requires at least 1 comment, but found 0`,
+      );
+    }
+    if (attempt.outcome === 'no_findings' && lines.length > 0) {
+      throw new Error(
+        `Outcome "no_findings" for attempt ${attemptId} requires 0 comments, but found ${lines.length}`,
+      );
+    }
+
+    // Parse and validate each line
+    return lines.map((l, idx) => {
+      let record: CommentRecord;
+      try {
+        record = JSON.parse(l) as CommentRecord;
+      } catch {
+        throw new Error(`Malformed JSONL at line ${idx + 1} in attempt-comments/${attemptId}.jsonl`);
+      }
+      // Validate path matches task.filePath
+      if (record.path !== expectedPath) {
+        throw new Error(
+          `Comment path mismatch in attempt ${attemptId} line ${idx + 1}: expected "${expectedPath}", got "${record.path}"`,
+        );
+      }
+      return record;
+    });
   }
 
   // -----------------------------------------------------------------------

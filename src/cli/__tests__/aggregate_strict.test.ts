@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import { writeContext, appendComment, writeFilterResult, writeRelocationResult } from '../../core/runs/store.js';
 import type { ReviewContext } from '../../core/model/request.js';
 import type { CommentRecord } from '../../core/model/comment.js';
-import type { RunRecord, TaskRecord, ReviewManifest, ManifestFile } from '../../core/orchestrator/types.js';
+import type { RunRecord, TaskRecord, AttemptRecord, ReviewManifest, ManifestFile } from '../../core/orchestrator/types.js';
 import { ORCHESTRATOR_SCHEMA_VERSION } from '../../core/orchestrator/types.js';
 import { sha256, manifestDigest } from '../../core/orchestrator/fingerprint.js';
 
@@ -37,12 +37,33 @@ const CTX: ReviewContext = {
 // Helpers
 // ---------------------------------------------------------------------------
 
+interface TaskDef {
+  taskId: string;
+  filePath: string;
+  taskState: string;
+  acceptedAttemptId?: string;
+  failureReason?: string;
+}
+
+interface AttemptDef {
+  attemptId: string;
+  state: string;
+  outcome: string;
+  stagedCommentCount: number;
+}
+
+interface AttemptCommentsDef {
+  attemptId: string;
+  records: CommentRecord[];
+}
+
 async function createSchema1Run(
   dir: string,
   runId: string,
   state: string,
-  taskStates: Array<{ taskId: string; filePath: string; taskState: string; acceptedAttemptId?: string; failureReason?: string }>,
-  attemptComments: Array<{ attemptId: string; records: CommentRecord[] }>,
+  taskStates: TaskDef[],
+  attemptDefs: AttemptDef[],
+  attemptComments: AttemptCommentsDef[],
 ): Promise<void> {
   const ocrDir = join(dir, '.ocr-runs', runId);
   await mkdir(ocrDir, { recursive: true });
@@ -106,6 +127,23 @@ async function createSchema1Run(
     await writeFile(join(tasksDir, `${t.taskId}.json`), JSON.stringify(task, null, 2) + '\n');
   }
 
+  // Write attempt records
+  for (const ad of attemptDefs) {
+    const attempt: AttemptRecord = {
+      runId,
+      taskId: taskStates.find((t) => t.acceptedAttemptId === ad.attemptId)?.taskId ?? 'task-0',
+      attemptId: ad.attemptId,
+      state: ad.state as AttemptRecord['state'],
+      leaseTokenDigest: sha256('test-token'),
+      leaseDeadline: new Date(Date.now() + 900_000).toISOString(),
+      stagedCommentCount: ad.stagedCommentCount,
+      outcome: ad.outcome as AttemptRecord['outcome'],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    await writeFile(join(tasksDir, `${attempt.taskId}.${ad.attemptId}.json`), JSON.stringify(attempt, null, 2) + '\n');
+  }
+
   // Write attempt comments
   if (attemptComments.length > 0) {
     const commentsDir = join(ocrDir, 'attempt-comments');
@@ -118,7 +156,7 @@ async function createSchema1Run(
 }
 
 // ---------------------------------------------------------------------------
-// Tests
+// Happy path tests
 // ---------------------------------------------------------------------------
 
 test('schema-1 completed run exits 0 and produces report with accepted comments', async () => {
@@ -129,6 +167,9 @@ test('schema-1 completed run exits 0 and produces report with accepted comments'
     await createSchema1Run(dir, 'run1', 'completed', [
       { taskId: 'task-0', filePath: 'src/a.ts', taskState: 'succeeded', acceptedAttemptId: 'attempt-1' },
       { taskId: 'task-1', filePath: 'src/b.ts', taskState: 'succeeded', acceptedAttemptId: 'attempt-2' },
+    ], [
+      { attemptId: 'attempt-1', state: 'succeeded', outcome: 'findings', stagedCommentCount: 1 },
+      { attemptId: 'attempt-2', state: 'succeeded', outcome: 'findings', stagedCommentCount: 1 },
     ], [
       {
         attemptId: 'attempt-1',
@@ -173,7 +214,7 @@ test('schema-1 active run exits 2 with stderr message', async () => {
     process.chdir(dir);
     await createSchema1Run(dir, 'run1', 'active', [
       { taskId: 'task-0', filePath: 'src/a.ts', taskState: 'running' },
-    ], []);
+    ], [], []);
     process.chdir(oldCwd);
 
     await assert.rejects(
@@ -198,6 +239,8 @@ test('schema-1 superseded run exits 2 with stderr message', async () => {
     process.chdir(dir);
     await createSchema1Run(dir, 'run1', 'superseded', [
       { taskId: 'task-0', filePath: 'src/a.ts', taskState: 'succeeded', acceptedAttemptId: 'attempt-1' },
+    ], [
+      { attemptId: 'attempt-1', state: 'succeeded', outcome: 'no_findings', stagedCommentCount: 0 },
     ], []);
     process.chdir(oldCwd);
 
@@ -224,6 +267,8 @@ test('schema-1 failed run exits 1 and writes diagnostic report', async () => {
     await createSchema1Run(dir, 'run1', 'failed', [
       { taskId: 'task-0', filePath: 'src/a.ts', taskState: 'failed', failureReason: 'retry_exhausted' },
       { taskId: 'task-1', filePath: 'src/b.ts', taskState: 'succeeded', acceptedAttemptId: 'attempt-2' },
+    ], [
+      { attemptId: 'attempt-2', state: 'succeeded', outcome: 'findings', stagedCommentCount: 1 },
     ], [
       {
         attemptId: 'attempt-2',
@@ -293,6 +338,8 @@ test('schema-1 completed run applies filters and relocations', async () => {
     await createSchema1Run(dir, 'run1', 'completed', [
       { taskId: 'task-0', filePath: 'src/a.ts', taskState: 'succeeded', acceptedAttemptId: 'attempt-1' },
     ], [
+      { attemptId: 'attempt-1', state: 'succeeded', outcome: 'findings', stagedCommentCount: 2 },
+    ], [
       {
         attemptId: 'attempt-1',
         records: [
@@ -355,6 +402,8 @@ test('schema-1 completed run reports partial files for failed tasks', async () =
       { taskId: 'task-0', filePath: 'src/a.ts', taskState: 'succeeded', acceptedAttemptId: 'attempt-1' },
       { taskId: 'task-1', filePath: 'src/b.ts', taskState: 'failed', failureReason: 'retry_exhausted' },
     ], [
+      { attemptId: 'attempt-1', state: 'succeeded', outcome: 'findings', stagedCommentCount: 1 },
+    ], [
       {
         attemptId: 'attempt-1',
         records: [
@@ -379,19 +428,16 @@ test('schema-1 completed run reports partial files for failed tasks', async () =
   }
 });
 
-test('schema-1 completed run with no comments produces empty report', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'ocrp-strict-empty-'));
+test('schema-1 completed run with no_findings produces empty report', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'ocrp-strict-nofindings-'));
   const oldCwd = process.cwd();
   try {
     process.chdir(dir);
     await createSchema1Run(dir, 'run1', 'completed', [
       { taskId: 'task-0', filePath: 'src/a.ts', taskState: 'succeeded', acceptedAttemptId: 'attempt-1' },
     ], [
-      {
-        attemptId: 'attempt-1',
-        records: [],
-      },
-    ]);
+      { attemptId: 'attempt-1', state: 'succeeded', outcome: 'no_findings', stagedCommentCount: 0 },
+    ], []);
     process.chdir(oldCwd);
 
     const { stdout } = await runAggregate(dir, ['--runId', 'run1', '--format', 'both']);
@@ -409,20 +455,18 @@ test('schema-1 completed run with no comments produces empty report', async () =
   }
 });
 
-test('schema-1 completed run fails closed on malformed attempt comments JSONL', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'ocrp-strict-malformed-'));
+// ---------------------------------------------------------------------------
+// Regression tests: corrupt / invalid data
+// ---------------------------------------------------------------------------
+
+test('succeeded task missing acceptedAttemptId fails closed', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'ocrp-strict-no-attemptid-'));
   const oldCwd = process.cwd();
   try {
     process.chdir(dir);
     await createSchema1Run(dir, 'run1', 'completed', [
-      { taskId: 'task-0', filePath: 'src/a.ts', taskState: 'succeeded', acceptedAttemptId: 'attempt-1' },
-    ], []);
-
-    // Write malformed JSONL directly
-    const commentsDir = join(dir, '.ocr-runs/run1/attempt-comments');
-    await mkdir(commentsDir, { recursive: true });
-    await writeFile(join(commentsDir, 'attempt-1.jsonl'), 'not valid json\n');
-
+      { taskId: 'task-0', filePath: 'src/a.ts', taskState: 'succeeded' }, // no acceptedAttemptId
+    ], [], []);
     process.chdir(oldCwd);
 
     await assert.rejects(
@@ -430,7 +474,7 @@ test('schema-1 completed run fails closed on malformed attempt comments JSONL', 
       (err: unknown) => {
         const e = err as { code?: number; stderr?: string };
         assert.equal(e.code, 1);
-        assert.match(e.stderr ?? '', /malformed/i);
+        assert.match(e.stderr ?? '', /acceptedAttemptId is missing/i);
         return true;
       },
     );
@@ -440,21 +484,275 @@ test('schema-1 completed run fails closed on malformed attempt comments JSONL', 
   }
 });
 
-test('schema-1 completed run with no attempt-comments dir returns empty', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'ocrp-strict-no-comments-'));
+test('succeeded task with missing attempt record fails closed', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'ocrp-strict-missing-attempt-'));
   const oldCwd = process.cwd();
   try {
     process.chdir(dir);
     await createSchema1Run(dir, 'run1', 'completed', [
       { taskId: 'task-0', filePath: 'src/a.ts', taskState: 'succeeded', acceptedAttemptId: 'attempt-1' },
-    ], []);
+    ], [], []); // no attempt records written
+    process.chdir(oldCwd);
+
+    await assert.rejects(
+      () => runAggregate(dir, ['--runId', 'run1', '--format', 'json']),
+      (err: unknown) => {
+        const e = err as { code?: number; stderr?: string };
+        assert.equal(e.code, 1);
+        assert.match(e.stderr ?? '', /attempt.*not found/i);
+        return true;
+      },
+    );
+  } finally {
+    process.chdir(oldCwd);
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('attempt record with wrong state fails closed', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'ocrp-strict-wrong-state-'));
+  const oldCwd = process.cwd();
+  try {
+    process.chdir(dir);
+    await createSchema1Run(dir, 'run1', 'completed', [
+      { taskId: 'task-0', filePath: 'src/a.ts', taskState: 'succeeded', acceptedAttemptId: 'attempt-1' },
+    ], [
+      { attemptId: 'attempt-1', state: 'running', outcome: 'findings', stagedCommentCount: 1 }, // not succeeded
+    ], [
+      {
+        attemptId: 'attempt-1',
+        records: [
+          { comment_id: 'c-1', path: 'src/a.ts', start_line: 1, end_line: 1, content: 'Issue' },
+        ],
+      },
+    ]);
+    process.chdir(oldCwd);
+
+    await assert.rejects(
+      () => runAggregate(dir, ['--runId', 'run1', '--format', 'json']),
+      (err: unknown) => {
+        const e = err as { code?: number; stderr?: string };
+        assert.equal(e.code, 1);
+        assert.match(e.stderr ?? '', /expected state succeeded/i);
+        return true;
+      },
+    );
+  } finally {
+    process.chdir(oldCwd);
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('attempt record missing outcome fails closed', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'ocrp-strict-no-outcome-'));
+  const oldCwd = process.cwd();
+  try {
+    process.chdir(dir);
+    await createSchema1Run(dir, 'run1', 'completed', [
+      { taskId: 'task-0', filePath: 'src/a.ts', taskState: 'succeeded', acceptedAttemptId: 'attempt-1' },
+    ], [
+      { attemptId: 'attempt-1', state: 'succeeded', outcome: '', stagedCommentCount: 1 },
+    ], [
+      {
+        attemptId: 'attempt-1',
+        records: [
+          { comment_id: 'c-1', path: 'src/a.ts', start_line: 1, end_line: 1, content: 'Issue' },
+        ],
+      },
+    ]);
+    process.chdir(oldCwd);
+
+    await assert.rejects(
+      () => runAggregate(dir, ['--runId', 'run1', '--format', 'json']),
+      (err: unknown) => {
+        const e = err as { code?: number; stderr?: string };
+        assert.equal(e.code, 1);
+        assert.match(e.stderr ?? '', /outcome is missing/i);
+        return true;
+      },
+    );
+  } finally {
+    process.chdir(oldCwd);
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('findings outcome with zero comments fails closed', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'ocrp-strict-findings-zero-'));
+  const oldCwd = process.cwd();
+  try {
+    process.chdir(dir);
+    await createSchema1Run(dir, 'run1', 'completed', [
+      { taskId: 'task-0', filePath: 'src/a.ts', taskState: 'succeeded', acceptedAttemptId: 'attempt-1' },
+    ], [
+      { attemptId: 'attempt-1', state: 'succeeded', outcome: 'findings', stagedCommentCount: 0 },
+    ], []); // no comments file
+    process.chdir(oldCwd);
+
+    await assert.rejects(
+      () => runAggregate(dir, ['--runId', 'run1', '--format', 'json']),
+      (err: unknown) => {
+        const e = err as { code?: number; stderr?: string };
+        assert.equal(e.code, 1);
+        assert.match(e.stderr ?? '', /Missing attempt-comments/i);
+        return true;
+      },
+    );
+  } finally {
+    process.chdir(oldCwd);
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('comment count mismatch fails closed', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'ocrp-strict-count-mismatch-'));
+  const oldCwd = process.cwd();
+  try {
+    process.chdir(dir);
+    await createSchema1Run(dir, 'run1', 'completed', [
+      { taskId: 'task-0', filePath: 'src/a.ts', taskState: 'succeeded', acceptedAttemptId: 'attempt-1' },
+    ], [
+      { attemptId: 'attempt-1', state: 'succeeded', outcome: 'findings', stagedCommentCount: 2 }, // says 2 but only 1 in file
+    ], [
+      {
+        attemptId: 'attempt-1',
+        records: [
+          { comment_id: 'c-1', path: 'src/a.ts', start_line: 1, end_line: 1, content: 'Issue' },
+        ],
+      },
+    ]);
+    process.chdir(oldCwd);
+
+    await assert.rejects(
+      () => runAggregate(dir, ['--runId', 'run1', '--format', 'json']),
+      (err: unknown) => {
+        const e = err as { code?: number; stderr?: string };
+        assert.equal(e.code, 1);
+        assert.match(e.stderr ?? '', /count mismatch/i);
+        return true;
+      },
+    );
+  } finally {
+    process.chdir(oldCwd);
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('comment path mismatch fails closed', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'ocrp-strict-path-mismatch-'));
+  const oldCwd = process.cwd();
+  try {
+    process.chdir(dir);
+    await createSchema1Run(dir, 'run1', 'completed', [
+      { taskId: 'task-0', filePath: 'src/a.ts', taskState: 'succeeded', acceptedAttemptId: 'attempt-1' },
+    ], [
+      { attemptId: 'attempt-1', state: 'succeeded', outcome: 'findings', stagedCommentCount: 1 },
+    ], [
+      {
+        attemptId: 'attempt-1',
+        records: [
+          { comment_id: 'c-1', path: 'src/wrong.ts', start_line: 1, end_line: 1, content: 'Issue' }, // path doesn't match task
+        ],
+      },
+    ]);
+    process.chdir(oldCwd);
+
+    await assert.rejects(
+      () => runAggregate(dir, ['--runId', 'run1', '--format', 'json']),
+      (err: unknown) => {
+        const e = err as { code?: number; stderr?: string };
+        assert.equal(e.code, 1);
+        assert.match(e.stderr ?? '', /path mismatch/i);
+        return true;
+      },
+    );
+  } finally {
+    process.chdir(oldCwd);
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('no_findings with zero comments and missing file succeeds', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'ocrp-strict-nofindings-ok-'));
+  const oldCwd = process.cwd();
+  try {
+    process.chdir(dir);
+    await createSchema1Run(dir, 'run1', 'completed', [
+      { taskId: 'task-0', filePath: 'src/a.ts', taskState: 'succeeded', acceptedAttemptId: 'attempt-1' },
+    ], [
+      { attemptId: 'attempt-1', state: 'succeeded', outcome: 'no_findings', stagedCommentCount: 0 },
+    ], []); // no attempt-comments dir at all
     process.chdir(oldCwd);
 
     const { stdout } = await runAggregate(dir, ['--runId', 'run1', '--format', 'json']);
     const summary = JSON.parse(stdout) as { rawCommentCount: number; commentCount: number };
-
     assert.equal(summary.rawCommentCount, 0);
     assert.equal(summary.commentCount, 0);
+  } finally {
+    process.chdir(oldCwd);
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('no_findings with non-zero stagedCommentCount fails closed', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'ocrp-strict-nofindings-nonzero-'));
+  const oldCwd = process.cwd();
+  try {
+    process.chdir(dir);
+    await createSchema1Run(dir, 'run1', 'completed', [
+      { taskId: 'task-0', filePath: 'src/a.ts', taskState: 'succeeded', acceptedAttemptId: 'attempt-1' },
+    ], [
+      { attemptId: 'attempt-1', state: 'succeeded', outcome: 'no_findings', stagedCommentCount: 1 }, // says 0 but has 1
+    ], [
+      {
+        attemptId: 'attempt-1',
+        records: [
+          { comment_id: 'c-1', path: 'src/a.ts', start_line: 1, end_line: 1, content: 'Issue' },
+        ],
+      },
+    ]);
+    process.chdir(oldCwd);
+
+    await assert.rejects(
+      () => runAggregate(dir, ['--runId', 'run1', '--format', 'json']),
+      (err: unknown) => {
+        const e = err as { code?: number; stderr?: string };
+        assert.equal(e.code, 1);
+        assert.match(e.stderr ?? '', /requires 0 comments/i);
+        return true;
+      },
+    );
+  } finally {
+    process.chdir(oldCwd);
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('malformed task JSON fails closed', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'ocrp-strict-bad-task-'));
+  const oldCwd = process.cwd();
+  try {
+    process.chdir(dir);
+    await createSchema1Run(dir, 'run1', 'completed', [
+      { taskId: 'task-0', filePath: 'src/a.ts', taskState: 'succeeded', acceptedAttemptId: 'attempt-1' },
+    ], [
+      { attemptId: 'attempt-1', state: 'succeeded', outcome: 'no_findings', stagedCommentCount: 0 },
+    ], []);
+
+    // Corrupt the task file
+    const tasksDir = join(dir, '.ocr-runs/run1/tasks');
+    await writeFile(join(tasksDir, 'task-0.json'), '{not valid json\n');
+
+    process.chdir(oldCwd);
+
+    await assert.rejects(
+      () => runAggregate(dir, ['--runId', 'run1', '--format', 'json']),
+      (err: unknown) => {
+        const e = err as { code?: number; stderr?: string };
+        assert.equal(e.code, 1);
+        return true;
+      },
+    );
   } finally {
     process.chdir(oldCwd);
     await rm(dir, { recursive: true, force: true });
