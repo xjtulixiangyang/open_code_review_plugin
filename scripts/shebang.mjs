@@ -25,6 +25,12 @@ const stemToBinName = {
   filter_apply: 'ocr-filter-apply',
   relocate_apply: 'ocr-relocate-apply',
   post_comments: 'ocr-post-comments',
+  orchestrator_start: 'ocr-orchestrator-start',
+  orchestrator_claim: 'ocr-orchestrator-claim',
+  orchestrator_ack: 'ocr-orchestrator-ack',
+  orchestrator_dispatch_fail: 'ocr-orchestrator-dispatch-fail',
+  orchestrator_reconcile: 'ocr-orchestrator-reconcile',
+  orchestrator_status: 'ocr-orchestrator-status',
 };
 
 // Map bin names to their .mjs stem for Windows .cmd wrappers
@@ -39,6 +45,12 @@ const binToMjsStem = {
   'code_comment': 'code_comment',
   'task_done': 'task_done',
   'file_read_diff': 'file_read_diff',
+  'ocr-orchestrator-start': 'orchestrator_start',
+  'ocr-orchestrator-claim': 'orchestrator_claim',
+  'ocr-orchestrator-ack': 'orchestrator_ack',
+  'ocr-orchestrator-dispatch-fail': 'orchestrator_dispatch_fail',
+  'ocr-orchestrator-reconcile': 'orchestrator_reconcile',
+  'ocr-orchestrator-status': 'orchestrator_status',
 };
 
 async function main() {
