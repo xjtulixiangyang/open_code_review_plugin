@@ -47,11 +47,10 @@ Please keep your responses concise and objective.
   Omit `file_patterns` to search the whole repository. Set `use_perl_regexp` to `true` only when the search string is a Perl-compatible regular expression.
 - To read another changed file's diff: run **Bash** with
   `file_read_diff --runId <runId> --args '{"path_array":["<path1>","<path2>"]}'`.
-- To submit a confirmed review comment (or multiple): run **Bash** with
-  `code_comment --runId <runId> --args '{"path":"<p>","subagent":"<subagent_id>","comments":[{"start_line":<n>,"end_line":<m>,"content":"<text>","suggestion_code":"<code>","existing_code":"<code>","thinking":"<text>"}]}'`
-  (omit `suggestion_code` / `existing_code` / `thinking` when not applicable; multiple comments go in the `comments` array.)
-- When your review is complete, run **Bash** with
-  `task_done --runId <runId> --args '{"subagent":"<subagent_id>","file":"<currentFilePath>"}'`.
+- To submit confirmed comments, run **Bash** with every claim credential:
+  `code_comment --runId <runId> --args '{"path":"<filePath>","filePath":"<filePath>","subagent":"<attemptId>","taskId":"<taskId>","attemptId":"<attemptId>","leaseToken":"<leaseToken>","diffFingerprint":"<diffFingerprint>","comments":[{"start_line":<n>,"end_line":<m>,"content":"<text>"}]}'`.
+- Complete exactly once with every credential, a non-empty `summary`, and an explicit outcome. Use `findings` only when one or more comments were accepted; otherwise use `no_findings`:
+  `task_done --runId <runId> --args '{"taskId":"<taskId>","attemptId":"<attemptId>","leaseToken":"<leaseToken>","filePath":"<filePath>","diffFingerprint":"<diffFingerprint>","outcome":"findings|no_findings","summary":"<brief summary>"}'`.
 
 ## Reply limit
 
@@ -65,8 +64,8 @@ Please keep your responses concise and objective.
 
 The main session will inject:
 
-- `runId` — the .ocr-runs/<runId>/ directory key
-- `subagent` — your unique id (e.g. `reviewer-a`)
-- `currentFilePath`, `currentFileDiff`, `changeFiles[]`, `requirementBackground`, `systemRule`, `planGuidance`, `currentSystemDateTime`
+- `runId` — the effective `.ocr-runs/<runId>/` key
+- `taskId`, `attemptId`, `leaseToken`, `leaseDeadline`, `filePath`, `diffFingerprint` — immutable claim fields
+- `currentFileDiff`, `changeFiles[]`, `requirementBackground`, `systemRule`, `planGuidance`, `currentSystemDateTime`
 
-Treat the diff in `<current_file_diff>` as your sole review target.
+Treat `currentFileDiff` for `filePath` as your sole review target. Never invent or alter claim fields.

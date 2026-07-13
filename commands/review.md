@@ -8,209 +8,84 @@ argument-hint: "[workspace|staged|<sha>|<from>..<to>] [--background \"...\"]"
 
 # /review — open-code-review-plugin
 
-Run a code review on the current git change set using the host's agent loop.
+Run a code review through the deterministic pull orchestrator. The TypeScript
+orchestrator, not this command, owns the file set, attempts, retries, leases,
+and completeness decision.
 
-## Workflow
+## Prepare and preview
 
-You are orchestrating a code review. Follow these steps in order.
+1. Run `ocr-prepare $ARGUMENTS` and parse its JSON as `prepareSummary`.
+2. If it fails, surface stderr and stop. If `fileCount == 0`, report "No changes to review." and stop successfully.
+3. If `preview` or `dryRun` is true, read the candidate `context.json`, present the existing preview table (file, status, hunks, changed lines, rule, exclusions), and stop.
+4. Run `ocr-orchestrator-start --runId <prepareSummary.runId>` and parse its JSON. Replace the working `runId` with `effectiveRunId` for every later command and artifact read. Read `.ocr-runs/<effectiveRunId>/context.json`.
 
-### Step 1 — Prepare
+`reviewConcurrency = prepareSummary.concurrency || 2`. Claude Code may dispatch
+at most this many claimed reviewers concurrently. Keep the existing 5-second
+batch cooldown, extended to 10 seconds after 503/timeouts.
 
-Run Bash:
+<!-- ORCHESTRATOR-PROTOCOL:START -->
+## Deterministic Orchestration Protocol
 
-```bash
-ocr-prepare $ARGUMENTS
-```
+The orchestrator is the sole source of review work. Never enumerate a separate
+file queue, invent a path, retry outside the orchestrator, or aggregate early.
+Before entering this loop, run `ocr-orchestrator-start --runId <candidateRunId>`
+and replace the working run ID with its `effectiveRunId`.
 
-Capture the stdout JSON. It contains `runId`, `fileCount`, `hunkCount`, `changedLines`, `contextPath`, `concurrency`, `preview`, `dryRun`, `resumed`, `remainingFileCount`, `rulesSource`, `plansGuidanceSource`, `excludedFileCount`, and `fileCountWarning`. If `concurrency` is absent because an older build produced the summary, use `2`.
+1. Run `ocr-orchestrator-reconcile --runId <effectiveRunId>` and parse the status.
+2. If `state` is `completed` or `failed`, leave the loop.
+3. Run `ocr-orchestrator-claim --runId <effectiveRunId> --capacity <capacity>`.
+4. For every returned claim, use exactly its `runId`, `taskId`, `attemptId`,
+   `leaseToken`, `leaseDeadline`, `filePath`, and `diffFingerprint`. Build that
+   file's PLAN/rule guidance from the effective run context, then dispatch one
+   reviewer carrying all claim fields.
+5. After the host accepts a reviewer dispatch, run
+   `ocr-orchestrator-ack --runId <effectiveRunId> --taskId <taskId> --attemptId <attemptId>`.
+   If dispatch itself fails before acknowledgement, run
+   `ocr-orchestrator-dispatch-fail --runId <effectiveRunId> --taskId <taskId> --attemptId <attemptId>`.
+6. Wait for the dispatched reviewers to finish, then reconcile again. A reviewer
+   message is not completion authority; only a validated structured `task_done`
+   transition changes the task to `succeeded`.
+7. If claim returns an empty array while leases are live, do not exit or invent
+   work. Wait until the returned `nextLeaseDeadline` (without busy polling), then
+   reconcile. Repeat until the run is terminal.
+8. After terminal state and post-processing, run
+   `ocr-aggregate --runId <effectiveRunId> --format <format> --strict true`.
+   Exit 0 means complete review. Exit 1 means a partial diagnostic report was
+   written because at least one file failed. Exit 2 means aggregation was not
+   allowed. Any non-zero strict aggregate is the final command failure and must
+   not be described as a clean review.
+<!-- ORCHESTRATOR-PROTOCOL:END -->
 
-If `fileCount` is 0 → tell the user "No changes to review." and stop. This is a successful skipped review, not a hard failure.
-If the command exits non-zero → surface the stderr to the user and stop.
+## Per-claim reviewer preparation
 
-If `fileCountWarning == true` → warn the user: "⚠️ This review spans <fileCount> files, which may exceed the host orchestrator's context limit. Consider narrowing scope with `--paths <glob>` or `--rules` include patterns, or run multiple smaller reviews. Proceeding with review of all <fileCount> files." Do not stop — let the user decide.
+For each claim, find `context.files[]` by exact `filePath` and verify its computed
+fingerprint is represented by the claim; do not substitute another file.
 
-If `preview == true` or `dryRun == true`:
+1. If changed lines for this file are at least 50, invoke `ocr-plan` with
+   `runId: <effectiveRunId>` and `currentFilePath: <filePath>`, and write valid
+   output to `.ocr-runs/<effectiveRunId>/plans/<safePathKey>.json`.
+2. Run `ocr-plan-guidance --runId <effectiveRunId> --path <filePath>`; use empty
+   guidance and record `OCRP-SKILL-040` on soft failure.
+3. Resolve `systemRule` from `rulesHit[0].text`, then `.message`, then
+   `assets/rule_docs/<docPath>`, otherwise empty with `OCRP-RULES-094`.
+4. Dispatch `ocr-reviewer` with: `runId`, `taskId`, `attemptId`, `leaseToken`,
+   `leaseDeadline`, `filePath`, `diffFingerprint`, `currentFileDiff`,
+   `changeFiles`, `requirementBackground`, `systemRule`, `planGuidance`, and
+   current ISO time. Do not include a host-selected attempt number.
 
-1. Read `.ocr-runs/<runId>/context.json`.
-2. Reply with a preview summary and then stop. Do not run Step 2, Step 3, Step 3.5, Step 3.6, or Step 4.
-3. Use this exact structure:
+## Filter and relocation
 
-   ```md
-   ## Review Preview
+After a task succeeds, process only comments from its accepted attempt. Invoke
+`ocr-review-filter` for visible candidate comments, then apply decisions with
+`ocr-filter-apply`. Run `ocr-relocate-apply` for visible comments. These are soft
+failures (`OCRP-FILTER-070`, `OCRP-RELOCATE-080`) and cannot change task success.
+Never read stale/failed-attempt comments from legacy `comments.jsonl` for a
+schema-1 run.
 
-   **Run**: `<runId>`  
-   **Range**: `<context.range>`  
-   **Mode**: `` `preview` `` when only preview is true, `` `dry-run` `` when only dryRun is true, or `` `preview + dry-run` `` when both are true.  
-   **Rules source**: `<context.rulesSource || summary.rulesSource || "system">`  
-   **Concurrency**: `<summary.concurrency || 2>`
+## Present result
 
-   ### Files to review (<context.files.length>)
-
-   | File | Status | Hunks | Changed lines | Rule |
-   |---|---:|---:|---:|---|
-   | `<file.path>` | `<file.status>` | `<file.hunks.length>` | `<sum of hunk lines where kind != " ">` | `<file.rulesHit[0].ruleId || "">` |
-
-   ### Excluded files (<context.excludedFiles.length>)
-
-   | File | Reason |
-   |---|---|
-   | `<excluded.path>` | `<excluded.reason>` |
-   ```
-
-4. If there are no excluded files, write `None` below the `Excluded files` heading instead of a table.
-
-### Step 2 — Load context for per-file PLAN/review
-
-Read `.ocr-runs/<runId>/context.json` to load the ReviewContext.
-
-Generated PLAN is not run once for the whole review. It is run per file in Step 3, matching the original OCR behavior: only files whose own changed-line count is at least `PLAN_MODE_LINE_THRESHOLD` (`50`) get generated PLAN guidance before their reviewer subagent runs.
-
-### Step 3 — Dispatch reviewer subagents in parallel
-
-Process `context.files[]` in bounded batches. Let `reviewConcurrency = prepareSummary.concurrency || 2`. Dispatch at most `reviewConcurrency` reviewer subagents at the same time. Do not start the next batch until every file in the current batch has either completed review or exhausted its retry attempts.
-
-For each batch, keep an in-memory table of `{ path, index, attempt, subagent, status }` for every non-skipped file in the batch. After dispatching all reviewers in the batch, explicitly wait for completion before continuing:
-
-1. A file is complete when `.ocr-runs/<runId>/done/<subagent>.json` exists and its `file` field equals that file path.
-2. Poll the batch completion state every **3 seconds** by reading `.ocr-runs/<runId>/done/` and the matching JSON files.
-3. Do not run Step 3.5, Step 3.6, or dispatch the next batch until all non-skipped files in the current batch are either `done` or have exhausted both attempts.
-4. If an Agent tool completion notification arrives, still verify the corresponding `done/<subagent>.json` marker before treating the file as complete. The marker is the source of truth, not the assistant text.
-5. If a file has no marker after a reviewer error/timeout/completion-without-marker, retry once with `reviewer-<index>-attempt-2` and update the table before waiting again.
-6. If attempt 2 also lacks a valid marker after error/timeout/completion-without-marker, mark that file `failed` and continue; `ocr-aggregate` will report it as partial (`OCRP-SUB-050/051`).
-
-**Batch cooldown:** Between batches, wait **5 seconds** before dispatching the next batch. This prevents the concurrent subagents from hitting Anthropic rate limits (HTTP 503) by spacing out API traffic across batches. If a batch had any 503 or timeout failures, extend the cooldown to **10 seconds** for that batch transition only. The stable default is `2`; when a run hits API 503s, reviewer timeouts, or many partial files, rerun with `--concurrency 1`.
-
-For each file in a batch:
-
-0. Skip files where `skipped === true`; mention them in the final report under a "Skipped files" section with their path and skipReason. Do not dispatch a reviewer for these files.
-
-1. Compute this file's changed-line count as the sum of all `hunk.lines` where `kind != " "` for `currentFilePath`.
-2. If this file's changed-line count is at least `50`, run per-file generated PLAN before reviewer dispatch:
-   - Invoke the `ocr-plan` skill with exactly: `runId` and `currentFilePath`.
-   - Parse the fenced ```json PlanOutput.
-   - If parsing succeeds, write it to `.ocr-runs/<runId>/plans/<safePathKey(currentFilePath)>.json`. Use `encodeURIComponent(currentFilePath)` for `<safePathKey(currentFilePath)>`.
-   - If parsing fails, set `planMissing = true` for this file, do not write a plan file, continue review, and mention `OCRP-SKILL-040` in the final report.
-3. If this file's changed-line count is lower than `50`, skip generated PLAN for this file.
-4. Compute `planGuidance` deterministically. Run:
-   ```bash
-   ocr-plan-guidance --runId <runId> --path <currentFilePath>
-   ```
-   Parse stdout JSON and use its `guidance` field. The returned `guidance` may include both this file's generated PLAN output and repository/user custom plans guidance loaded via `--plans`, `.code-review-plans.md`, or `~/.code-review/plans.md`. If the command fails, set `planGuidance = ""` and mention `OCRP-SKILL-040` in the final report. Do not manually re-implement plan filtering in the main conversation.
-5. Compute `systemRule` from `context.files[].rulesHit[0]`:
-   - If `rulesHit[0].text` is a non-empty string, use it verbatim.
-   - Else if `rulesHit[0].message` is a non-empty string, use it verbatim.
-   - Else read `assets/rule_docs/<rulesHit[0].docPath>` verbatim.
-   - Else use an empty string and mention `OCRP-RULES-094` in the final report.
-6. Dispatch a `ocr-reviewer` subagent with a prompt containing exactly:
-
-   ```
-   runId: <runId>
-   subagent: reviewer-<index>-attempt-<attempt>
-   currentFilePath: <path>
-   currentFileDiff:
-   <fenced diff block>
-   changeFiles: <comma-joined list>
-   requirementBackground: <background or "">
-   systemRule:
-   <effective systemRule text>
-   planGuidance:
-   <planGuidance string or "">
-   currentSystemDateTime: <ISO-8601>
-   ```
-7. Retry reviewer dispatch exactly once for the same file when any of these happens:
-   - the subagent errors;
-   - the subagent times out;
-   - the subagent returns but no matching `.ocr-runs/<runId>/done/reviewer-*.json` entry exists for that file.
-   Use `reviewer-<index>-attempt-2` for the retry subagent id. Do not retry a file after `task_done` is recorded.
-8. If both attempts fail, continue to the next file and let `ocr-aggregate` report the file as partial (`OCRP-SUB-050/051`). A partial file means review did not complete for that file; it must not be described as a clean no-issue result.
-
-### Step 3.5 — Per-file filter (REVIEW_FILTER_TASK)
-
-After a file has a verified `done/<subagent>.json` marker (or after it is marked `failed` following both attempts), run the filter stage for that file before moving to the next batch:
-
-1. Read `.ocr-runs/<runId>/comments.jsonl` and select comments where `path == currentFilePath`, keeping `comment_id`.
-2. If the file has zero comments, skip filter for this file.
-3. Otherwise invoke the `ocr-review-filter` skill with exactly: runId, subagent `filter-<index>`, currentFilePath, currentFileDiff, requirementBackground, systemRule, planGuidance, and candidateComments.
-4. Capture the skill's fenced ```json output. It must be a FilterFileResult without `_meta`.
-5. Run Bash:
-   ```bash
-   ocr-filter-apply --runId <runId> --path <currentFilePath> --input '<json string>' --subagent filter-<index>
-   ```
-6. If the skill output is unparseable, treat it as a soft failure: continue without filtering this file and mention `OCRP-FILTER-070` in the final report.
-7. If `ocr-filter-apply` exits non-zero, retry the exact same `ocr-filter-apply` command once. If the second attempt also exits non-zero, continue without filtering this file and mention `OCRP-FILTER-070` in the final report.
-
-### Step 3.6 — Line relocation (RE_LOCATION_TASK)
-
-After each file's filter stage completes, run the line relocation stage for that file:
-
-1. If the file has zero visible comments, skip relocation for this file.
-2. Otherwise run:
-   ```bash
-   ocr-relocate-apply --runId <runId> --path <currentFilePath>
-   ```
-3. The command reads `context.json` for the file's diff, reads `comments.jsonl` and `filters/`, and writes relocation decisions to `.ocr-runs/<runId>/relocations/<safePathKey>.json`.
-4. If `ocr-relocate-apply` exits non-zero, retry the exact same command once. If the second attempt also exits non-zero, treat it as a soft failure: continue without relocating this file and mention `OCRP-RELOCATE-080` in the final report.
-5. If deterministic relocation reports fallback comments, optionally invoke the `ocr-relocate` skill for those comments and apply the returned decisions.
-
-Relocation is deterministic and does not require an LLM call. Failures are soft; aggregate will use original line ranges.
-
-### Step 4 — Aggregate
-
-After all reviewer subagents return (each ends with `done: <path>`), run Bash:
-
-```bash
-ocr-aggregate --runId <runId> --format <markdown|json|both>
-```
-
-The stdout JSON contains `reportMd`, `reportJson`, `partial`, `partialFiles`, `rawCommentCount`, `commentCount`, `filteredCommentCount`, `filterWarnings`, and `relocationWarnings`.
-
-If no format flag was provided to `ocr-prepare`, use `both`.
-
-### Step 5 — Present to user
-
-Read `.ocr-runs/<runId>/report.md` and reply with its full contents inline. Also tell the user where the artifacts live:
-
-- `<repo>/.ocr-runs/<runId>/report.md`
-- `<repo>/.ocr-runs/<runId>/report.json`
-- `<repo>/.ocr-runs/<runId>/comments.jsonl`
-- `<repo>/.ocr-runs/<runId>/filters/` (when any comments were filtered)
-
-If `partial == true`, prefix your message with: `⚠️ Some files did not complete review; see Warnings section.` Do not summarize the run as "no issues found" without also saying the review was incomplete for `partialFiles[]`.
-
-### Step 6 — Post to PR (optional)
-
-If the user requests posting review comments to a PR:
-
-1. Run Bash:
-   ```bash
-   ocr-post-comments --runId <runId> --provider <github|gitlab> --pr <number>
-   ```
-2. Comments are posted as **inline review comments** on the diff (GitHub
-   `pulls.createReview`, GitLab Discussions API). A multi-level fallback
-   strategy is used: batch inline review → individual inline → plain
-   PR/MR comment.
-3. Use `--dry-run` to preview the comments that would be posted without
-   calling the platform API.
-4. Use `--retry <n>` to set the per-comment retry count (default: 1).
-5. The stdout JSON contains `posted`, `failed`, `skipped`, and `details`.
-   Reply with a summary.
-
-## Error handling
-
-| Error code | What to do |
-|---|---|
-| OCRP-LOAD-002 | "Plugin not built — please run `npm run build` in the plugin directory." |
-| OCRP-RUN-010 | "Not a git repository at `<cwd>`. Run `/review` inside a git repo." |
-| OCRP-RUN-011 | "Argument conflict or unsupported flag: <message>. Use only one review target." |
-| OCRP-RUN-012 | "No changes to review." (exit 0) |
-| OCRP-SKILL-040 | Continue without plan_guidance; mention in the final report. |
-| OCRP-SUB-050/051 | Already surfaced by `ocr-aggregate` as partial. |
-| OCRP-HOOK-060 | Silent; jsonl bus still works. |
-| OCRP-FILTER-070 | Continue without filtering that file; mention the downgrade in the final report. |
-| OCRP-FILTER-071 | `ocr-filter-apply` rejected a path outside the review context; treat as filter soft failure in orchestration. |
-| OCRP-FILTER-072 | `ocr-filter-apply` rejected malformed filter decisions; treat as filter soft failure in orchestration. |
-| OCRP-RELOCATE-080 | `ocr-relocate-apply` failed for a file; aggregate uses original line ranges. |
-| OCRP-RELOCATE-081 | Relocation input references path outside review context. |
-| OCRP-RELOCATE-082 | Relocation decision malformed. |
-| OCRP-RULES-090/091/092/093 | Custom rule file cannot be read, parsed, or validated; surface stderr from `ocr-prepare` and stop. |
-| OCRP-RULES-094 | Effective rule text could not be loaded for a file; continue with an empty rule and mention in final report. |
+Use format from the prepare arguments, defaulting to `both`. Read requested
+artifacts under `.ocr-runs/<effectiveRunId>/`. On complete success, present the
+Markdown report. On failed strict aggregation, clearly label it partial and
+list failed files/reasons; do not say "no issues found". Optional PR posting
+continues to use `ocr-post-comments --runId <effectiveRunId> ...`.
