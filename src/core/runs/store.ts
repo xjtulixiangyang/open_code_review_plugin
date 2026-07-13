@@ -1,7 +1,9 @@
+import { createHash } from 'node:crypto';
 import { mkdir, writeFile, readFile, readdir, open, stat } from 'node:fs/promises';
 import { dirname, join, sep } from 'node:path';
 import type { FilterFileResult, ReadFilterResultsOutput } from '../model/filter.js';
 import type { RelocationFileResult, ReadRelocationResultsOutput } from '../model/relocation.js';
+import type { LaunchConfig } from '../orchestrator/types.js';
 
 const ALPHABET = 'abcdefghijklmnopqrstuvwxyz0123456789';
 
@@ -64,15 +66,18 @@ export function runDir(runId: string): string {
   return join(process.cwd(), '.ocr-runs', runId);
 }
 
-async function resolveRunDir(runId: string): Promise<string> {
+export async function resolveExistingRunDir(runId: string): Promise<string | null> {
   const containing = containingRunDir(runId);
   if (containing && await fileExists(join(containing, 'context.json'))) return containing;
   const current = runDir(runId);
-  const contextPath = join(current, 'context.json');
-  if (await fileExists(contextPath)) return current;
+  if (await fileExists(join(current, 'context.json'))) return current;
   const parent = worktreeParentRunDir(runId);
   if (parent && await fileExists(join(parent, 'context.json'))) return parent;
-  return current;
+  return null;
+}
+
+async function resolveRunDir(runId: string): Promise<string> {
+  return await resolveExistingRunDir(runId) ?? runDir(runId);
 }
 
 async function ensureDir(p: string): Promise<void> {
@@ -225,8 +230,37 @@ export async function writeReport(
   await writeFile(join(dir, name), body, 'utf8');
 }
 
+export async function listRunDirsNear(runId: string): Promise<string[]> {
+  const candidate = await resolveExistingRunDir(runId);
+  const root = dirname(candidate ?? runDir(runId));
+  const names = await readdir(root).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === 'ENOENT') return [];
+    throw error;
+  });
+  return names.sort().map((name) => join(root, name));
+}
+
+export async function writeLaunchConfig(runId: string, config: LaunchConfig): Promise<void> {
+  const dir = runDir(runId);
+  await ensureDir(dir);
+  await writeFile(join(dir, 'launch.json'), JSON.stringify(config, null, 2), 'utf8');
+}
+
+export async function readLaunchConfig(runId: string): Promise<LaunchConfig> {
+  const dir = await resolveRunDir(runId);
+  return JSON.parse(await readFile(join(dir, 'launch.json'), 'utf8')) as LaunchConfig;
+}
+
+const WINDOWS_RESERVED_NAMES = new Set(['con', 'prn', 'aux', 'nul', 'com1', 'com2', 'com3', 'com4', 'com5', 'com6', 'com7', 'com8', 'com9', 'lpt1', 'lpt2', 'lpt3', 'lpt4', 'lpt5', 'lpt6', 'lpt7', 'lpt8', 'lpt9']);
+
 export function safePathKey(path: string): string {
-  return encodeURIComponent(path);
+  const encoded = encodeURIComponent(path);
+  const segments = path.replace(/\\/g, '/').split('/');
+  const reserved = segments.some((segment) => WINDOWS_RESERVED_NAMES.has(segment.replace(/\.[^/.]+$/, '').toLowerCase()));
+  if (!reserved && Buffer.byteLength(encoded, 'utf8') <= 200) return encoded;
+  const digest = createHash('sha256').update(path, 'utf8').digest('hex');
+  const prefix = encoded.slice(0, Math.max(1, 199 - digest.length - 1));
+  return `${prefix}-${digest}`;
 }
 
 export async function writeFilterResult(runId: string, result: FilterFileResult): Promise<void> {

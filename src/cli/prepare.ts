@@ -2,10 +2,12 @@
 import { realpath } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { buildReviewContext } from '../core/context/review_context.js';
-import { writeContext } from '../core/runs/store.js';
+import { writeContext, writeLaunchConfig } from '../core/runs/store.js';
 import { MAX_FILES_PER_RUN } from '../core/prompts/constants.js';
+import { DEFAULT_LEASE_DURATION_MS, DEFAULT_MAX_ATTEMPTS } from '../core/orchestrator/types.js';
 import type { ReviewRequest } from '../core/model/request.js';
 import type { ReviewMode } from '../core/types.js';
+import type { LaunchConfig } from '../core/orchestrator/types.js';
 
 export const DEFAULT_REVIEW_CONCURRENCY = 2;
 export const MAX_REVIEW_CONCURRENCY = 8;
@@ -116,6 +118,22 @@ async function main(): Promise<void> {
   };
   const ctx = await buildReviewContext(req);
   await writeContext(ctx.runId, ctx);
+  const launchConfig: LaunchConfig = {
+    schemaVersion: 1,
+    mode: args.mode,
+    commit: args.commit,
+    from: args.from,
+    to: args.to,
+    paths: args.paths,
+    background: args.background,
+    rulesPath: args.rulesPath,
+    plansPath: args.plansPath,
+    format: args.format,
+    concurrency,
+    leaseDurationMs: DEFAULT_LEASE_DURATION_MS,
+    maxAttempts: DEFAULT_MAX_ATTEMPTS,
+  };
+  await writeLaunchConfig(ctx.runId, launchConfig);
   const summary = {
     runId: ctx.runId,
     fileCount: ctx.files.length,
