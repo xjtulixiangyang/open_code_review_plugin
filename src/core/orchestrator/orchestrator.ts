@@ -180,6 +180,22 @@ export class Orchestrator {
     );
   }
 
+  /**
+   * Read all accepted attempt comments from a completed run.
+   *
+   * For each succeeded task with an acceptedAttemptId, reads the
+   * attempt-comments/<attemptId>.jsonl file and collects all CommentRecords.
+   * For each failed task, records the file path as partial.
+   *
+   * This is a read-only operation intended for the aggregate CLI.
+   * Fails closed on malformed JSONL.
+   */
+  readAcceptedComments(): Promise<{ comments: CommentRecord[]; partialFiles: string[] }> {
+    return withRunLock(this.runDir, async () => {
+      return this.readAcceptedCommentsLocked();
+    });
+  }
+
   // -----------------------------------------------------------------------
   // Locked internals
   // -----------------------------------------------------------------------
@@ -563,6 +579,47 @@ export class Orchestrator {
     } catch (err: unknown) {
       if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
         return 0;
+      }
+      throw err;
+    }
+  }
+
+  // -----------------------------------------------------------------------
+  // Read accepted comments (for aggregate CLI)
+  // -----------------------------------------------------------------------
+
+  private async readAcceptedCommentsLocked(): Promise<{ comments: CommentRecord[]; partialFiles: string[] }> {
+    const tasks = await this.listTasksLocked();
+    const comments: CommentRecord[] = [];
+    const partialFiles: string[] = [];
+
+    for (const task of tasks) {
+      if (task.state === 'succeeded' && task.acceptedAttemptId) {
+        const attemptComments = await this.readAttemptCommentsFileLocked(task.acceptedAttemptId);
+        comments.push(...attemptComments);
+      } else if (task.state === 'failed') {
+        partialFiles.push(task.filePath);
+      }
+    }
+
+    return { comments, partialFiles };
+  }
+
+  private async readAttemptCommentsFileLocked(attemptId: string): Promise<CommentRecord[]> {
+    const commentsPath = join(this.runDir, 'attempt-comments', `${attemptId}.jsonl`);
+    try {
+      const content = await readFile(commentsPath, 'utf-8');
+      const lines = content.split('\n').filter((l) => l.trim().length > 0);
+      return lines.map((l) => {
+        try {
+          return JSON.parse(l) as CommentRecord;
+        } catch {
+          throw new Error(`Malformed JSONL in attempt-comments/${attemptId}.jsonl`);
+        }
+      });
+    } catch (err: unknown) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+        return [];
       }
       throw err;
     }

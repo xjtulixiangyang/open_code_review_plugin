@@ -26,6 +26,7 @@
 - **selectEffectiveRun** (5 tests): fresh start (no prior runs), resume compatible active run, supersede on changed diff, never resume without schema-1 manifest, never resume completed/failed runs
 - **startCandidate** (1 test): high-level API returns compatible active run
 
+<<<<<<< Updated upstream
 ### orchestrator_start.test.ts (3 tests, all pass)
 
 - Fresh start JSON output
@@ -67,3 +68,34 @@ npm run typecheck
 ### Concerns
 - `resolveExistingRunDir` in `store.ts` depends on `process.cwd()`. Tests must `chdir()` to the temp root before calling `selectEffectiveRun` or `startCandidate`. This is consistent with how other tests in the codebase work.
 - The `startCandidate` function reads `context.repoRoot` from the stored context. If the repo root changes between prepare and start, the repository identity will differ and resume will not match. This is correct behavior.
+=======
+## Files Modified
+- `commands/review.md`
+- `README.md`
+
+## Step 1: Fix review.md duplicate retry bullets — COMPLETE
+
+**What was done:**
+- Removed the old duplicate retry bullets (old lines 111-113) from `commands/review.md`:
+  - `4. Retry reviewer dispatch at most once for the same file when the subagent errors, times out, or returns without a matching ...`
+  - `5. If both attempts fail, continue to the next file and let ocr-aggregate report the file as partial ...`
+  - (plus the blank line between old and new items)
+- Kept only the new exact wording (now at lines 111-116):
+  - `4. Retry reviewer dispatch exactly once for the same file when any of these happens:`
+  - `5. If both attempts fail, continue to the next file and let ocr-aggregate report the file as partial (OCRP-SUB-050/051). A partial file means review did not complete for that file; it must not be described as a clean no-issue result.`
+
+**Verification:**
+```
+$ grep -n "Retry reviewer dispatch\|must not be described as a clean no-issue result\|Do not summarize the run as" commands/review.md
+111:4. Retry reviewer dispatch exactly once for the same file when any of these happens:
+115:5. If both attempts fail, continue to the next file and let `ocr-aggregate` report the file as partial (`OCRP-SUB-050/051`). A partial file means review did not complete for that file; it must not be described as a clean no-issue result.
+168:If `partial == true`, prefix your message with: `⚠️ Some files did not complete review; see Warnings section.` Do not summarize the run as "no issues found" without also saying the review was incomplete for `partialFiles[]`.
+```
+Only one occurrence of each retry phrase remains. The "Do not summarize" line at line 168 is in Step 5 (final response) and is correct/expected.
+
+**Commit:**
+```
+2d9a9a6..a4b4b35  main -> main
+fix(review): remove duplicate retry bullets, keep exact wording
+```
+>>>>>>> Stashed changes

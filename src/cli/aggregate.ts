@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import {
   readContext,
   readComments,
@@ -7,9 +9,11 @@ import {
   readEvents,
   listDone,
   writeReport,
+  resolveExistingRunDir,
 } from '../core/runs/store.js';
 import { renderMarkdownReport } from '../core/report/markdown.js';
 import { renderJsonReport } from '../core/report/json.js';
+import { Orchestrator } from '../core/orchestrator/orchestrator.js';
 import type { ReviewContext } from '../core/model/request.js';
 import type { CommentRecord } from '../core/model/comment.js';
 import type { RelocationWarning } from '../core/model/relocation.js';
@@ -62,7 +66,87 @@ async function main(): Promise<void> {
   const ctx = await readContext<ReviewContext>(f.runId);
   const events = await readEvents<ToolCallEvent>(f.runId);
   const warnings = eventWarnings(events);
-  const rawComments = await readComments<CommentRecord>(f.runId);
+
+  // -----------------------------------------------------------------------
+  // Schema-1 detection — read run.json directly for authoritative state
+  // -----------------------------------------------------------------------
+  const runDir = await resolveExistingRunDir(f.runId);
+  let schema1State: string | null = null;
+  let orchestrator: Orchestrator | null = null;
+  if (runDir) {
+    try {
+      const runRecordRaw = await readFile(join(runDir, 'run.json'), 'utf8');
+      const runRecord = JSON.parse(runRecordRaw);
+      if (runRecord && runRecord.schemaVersion === 1) {
+        schema1State = runRecord.state;
+        orchestrator = new Orchestrator(runDir);
+      }
+    } catch {
+      // No run.json or malformed -> old-schema (fail closed on malformed)
+    }
+  }
+
+  // -----------------------------------------------------------------------
+  // Read comments and determine partial files
+  // -----------------------------------------------------------------------
+  let rawComments: CommentRecord[];
+  let partialFiles: string[];
+
+  if (schema1State !== null && orchestrator) {
+    // Schema-1 strict aggregation
+    if (schema1State === 'active' || schema1State === 'superseded') {
+      process.stderr.write(
+        `[ocr-aggregate] Run ${f.runId} is ${schema1State}; aggregation requires completed or failed state\n`,
+      );
+      process.exit(2);
+    }
+
+    if (schema1State === 'failed') {
+      // Read task counts from orchestrator for diagnostic report
+      const status = await orchestrator.status();
+      // Write diagnostic report and exit 1
+      const diagnosticJson = JSON.stringify({
+        status: 'completed_with_errors',
+        runId: f.runId,
+        state: 'failed',
+        taskCounts: status.taskCounts,
+        message: 'Review run failed; some tasks did not complete successfully',
+      }, null, 2);
+      await writeReport(f.runId, 'report.json', diagnosticJson);
+      const diagnosticMd = [
+        '# Review Run Failed',
+        '',
+        `Run \`${f.runId}\` ended in **failed** state.`,
+        '',
+        `- Succeeded tasks: ${status.taskCounts.succeeded}`,
+        `- Failed tasks: ${status.taskCounts.failed}`,
+        `- Queued tasks: ${status.taskCounts.queued}`,
+        `- Leased tasks: ${status.taskCounts.leased}`,
+        `- Running tasks: ${status.taskCounts.running}`,
+        '',
+      ].join('\n');
+      await writeReport(f.runId, 'report.md', diagnosticMd);
+      process.stderr.write(diagnosticJson + '\n');
+      process.exit(1);
+    }
+
+    // state === 'completed'
+    const accepted = await orchestrator.readAcceptedComments();
+    rawComments = accepted.comments;
+    partialFiles = accepted.partialFiles;
+  } else {
+    // Old-schema legacy path
+    rawComments = await readComments<CommentRecord>(f.runId);
+    const dones = await listDone(f.runId);
+    const doneFiles = new Set(dones.map((d) => d.file));
+    const expected = new Set(ctx.files.map((x) => x.path));
+    partialFiles = [];
+    for (const p of expected) if (!doneFiles.has(p)) partialFiles.push(p);
+  }
+
+  // -----------------------------------------------------------------------
+  // Shared filter pipeline
+  // -----------------------------------------------------------------------
   const filters = await readFilterResults(f.runId);
   const contextPaths = new Set(ctx.files.map((file) => file.path));
   const commentById = new Map(rawComments.map((comment) => [comment.comment_id, comment]));
@@ -88,13 +172,10 @@ async function main(): Promise<void> {
   }
   const comments = rawComments.filter((comment) => !hiddenIds.has(comment.comment_id));
   const filteredCommentCount = rawComments.length - comments.length;
-  const dones = await listDone(f.runId);
-  const doneFiles = new Set(dones.map((d) => d.file));
-  const expected = new Set(ctx.files.map((x) => x.path));
-  const partialFiles: string[] = [];
-  for (const p of expected) if (!doneFiles.has(p)) partialFiles.push(p);
 
-  // --- Relocation pass ---
+  // -----------------------------------------------------------------------
+  // Shared relocation pipeline
+  // -----------------------------------------------------------------------
   const relocationData = await readRelocationResults(f.runId);
   const relocationWarnings: RelocationWarning[] = [...relocationData.warnings];
   let relocatedCount = 0;
