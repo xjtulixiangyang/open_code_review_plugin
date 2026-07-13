@@ -208,6 +208,15 @@ async function acquire(
   );
 }
 
+/** Renew the lock lease only while the same owner still holds it. */
+async function renewIfOwner(runDir: string, ownerId: string, leaseMs: number): Promise<void> {
+  const lockDir = lockDirPath(runDir);
+  const owner = await readOwner(lockDir);
+  if (!owner || owner.ownerId !== ownerId) return;
+  owner.expiresAt = new Date(Date.now() + leaseMs).toISOString();
+  await writeOwner(lockDir, owner);
+}
+
 /**
  * Release the lock if we are still the owner.
  *
@@ -296,23 +305,31 @@ export async function withRunLock<T>(
   await prev;
 
   let ownerId: string | undefined;
+  let heartbeat: NodeJS.Timeout | undefined;
   try {
     ownerId = randomUUID();
     await acquire(runDir, ownerId, DEFAULT_LEASE_MS);
 
     heldLocks.add(runDir);
+    const heartbeatOwnerId = ownerId;
+    heartbeat = setInterval(() => {
+      void renewIfOwner(runDir, heartbeatOwnerId, DEFAULT_LEASE_MS);
+    }, Math.floor(DEFAULT_LEASE_MS / 3));
+    heartbeat.unref();
 
     try {
       return await operation();
     } finally {
+      if (heartbeat) clearInterval(heartbeat);
       heldLocks.delete(runDir);
       if (ownerId) {
         await releaseIfOwner(runDir, ownerId);
       }
     }
   } finally {
-    // Signal that this operation (including release or failure) is done
+    // Signal that this operation (including release or failure) is done.
     releaseNext();
+    if (serialQueues.get(runDir) === next) serialQueues.delete(runDir);
   }
 }
 
