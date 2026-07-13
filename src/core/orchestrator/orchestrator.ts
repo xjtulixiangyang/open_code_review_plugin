@@ -1,5 +1,5 @@
 import { randomBytes, randomUUID } from 'node:crypto';
-import { readdir } from 'node:fs/promises';
+import { readdir, readFile, appendFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { withRunLock } from './lock.js';
 import { atomicWriteJson, appendAuditEvent, readJson } from './storage.js';
@@ -10,6 +10,8 @@ import type {
   AttemptRecord,
   ClaimResult,
   ReconcileResult,
+  CodeCommentInput,
+  CodeCommentResult,
   TaskCounts,
   RunState,
   AuditEvent,
@@ -140,6 +142,21 @@ export class Orchestrator {
     return withRunLock(this.runDir, async () => {
       return this.recomputeRunLocked();
     });
+  }
+
+  /**
+   * Stage a code comment under a valid lease.
+   *
+   * Validates that the run is active, the task is running, the attempt
+   * matches, the file path and diff fingerprint match, the lease token
+   * is valid (SHA-256 digest matches), and the lease has not expired.
+   * Appends the comment to a JSONL file and updates the attempt record's
+   * stagedCommentCount atomically under the run lock.
+   */
+  codeComment(input: CodeCommentInput): Promise<CodeCommentResult> {
+    return withRunLock(this.runDir, () =>
+      this.codeCommentLocked(input),
+    );
   }
 
   // -----------------------------------------------------------------------
@@ -478,6 +495,142 @@ export class Orchestrator {
       }
     }
     return counts;
+  }
+
+  // -----------------------------------------------------------------------
+  // Code comment staging
+  // -----------------------------------------------------------------------
+
+  private async codeCommentLocked(input: CodeCommentInput): Promise<CodeCommentResult> {
+    const { taskId, attemptId, leaseToken, filePath, diffFingerprint, comment } = input;
+
+    // Validate run is active
+    const runRecord = await this.readRunRecordLocked();
+    if (!runRecord || runRecord.state !== 'active') {
+      throw new Error(`Run is not active (state=${runRecord?.state ?? 'missing'})`);
+    }
+
+    // Determine schema version for legacy compatibility
+    // schemaVersion === 1 => schema-1 (credentials always required)
+    // schemaVersion undefined/0 => old-schema (legacy mode when no taskId)
+    const isSchema1 = runRecord.schemaVersion === 1;
+    const isLegacy = !taskId && !isSchema1;
+
+    // Read the task record
+    const taskIdToUse = taskId || (await this.findFirstTaskIdLocked());
+    if (!taskIdToUse) {
+      throw new Error('No task found for this run');
+    }
+    const task = await this.readTaskLocked(taskIdToUse);
+    if (!task) {
+      throw new Error(`Task ${taskIdToUse} not found`);
+    }
+
+    // Validate task is running
+    if (task.state !== 'running') {
+      throw new Error(`Task ${taskIdToUse} is not running (state=${task.state})`);
+    }
+
+    // Validate attempt ID matches current attempt
+    if (task.currentAttemptId !== attemptId) {
+      throw new Error(
+        `Attempt ID mismatch for task ${taskIdToUse}: expected ${task.currentAttemptId}, got ${attemptId}`,
+      );
+    }
+
+    // Validate file path
+    if (task.filePath !== filePath) {
+      throw new Error(`File path mismatch: expected ${task.filePath}, got ${filePath}`);
+    }
+
+    // Validate diff fingerprint
+    if (task.diffFingerprint !== diffFingerprint) {
+      throw new Error(`Diff fingerprint mismatch: expected ${task.diffFingerprint}, got ${diffFingerprint}`);
+    }
+
+    // Read the attempt record
+    const attempt = await this.readAttemptLocked(taskIdToUse, attemptId);
+    if (!attempt) {
+      throw new Error(`Attempt ${attemptId} not found for task ${taskIdToUse}`);
+    }
+
+    // Validate lease token (SHA-256 digest) — skip for legacy mode
+    if (!isLegacy) {
+      const leaseTokenDigest = sha256(leaseToken);
+      if (attempt.leaseTokenDigest !== leaseTokenDigest) {
+        throw new Error('Invalid lease token: SHA-256 digest does not match');
+      }
+
+      // Validate lease not expired
+      if (Date.parse(attempt.leaseDeadline) <= this.now().getTime()) {
+        throw new Error('Lease has expired');
+      }
+    }
+
+    // Generate comment ID
+    const commentId = randomUUID();
+
+    // Build JSONL entry
+    const entry = JSON.stringify({
+      commentId,
+      attemptId,
+      filePath,
+      diffFingerprint,
+      comment,
+      createdAt: this.now().toISOString(),
+    });
+
+    // Append to JSONL file
+    const commentsPath = join(this.runDir, TASKS_DIR, `${taskIdToUse}.${attemptId}.comments.jsonl`);
+
+    // Read existing JSONL to recover count
+    let recoveredCount = 0;
+    try {
+      const existingContent = await readFile(commentsPath, 'utf-8');
+      const lines = existingContent.split('\n').filter(l => l.trim().length > 0);
+      for (const line of lines) {
+        try {
+          JSON.parse(line);
+          recoveredCount++;
+        } catch {
+          // Malformed JSONL must fail closed, not be silently skipped
+          throw new Error(`Malformed JSONL in comments file: cannot parse line`);
+        }
+      }
+    } catch (err: unknown) {
+      if (err instanceof Error && err.message.startsWith('Malformed JSONL')) {
+        throw err;
+      }
+      // File doesn't exist yet, that's fine
+    }
+
+    // Append the new entry
+    await appendFile(commentsPath, entry + '\n', { encoding: 'utf-8', flag: 'a' });
+
+    // Update attempt record's stagedCommentCount
+    const newCount = recoveredCount + 1;
+    attempt.stagedCommentCount = newCount;
+    attempt.updatedAt = this.now().toISOString();
+    await this.writeAttemptLocked(attempt);
+
+    // Emit audit event (no plaintext lease token)
+    await this.emitAuditEventLocked({
+      type: 'comment.staged',
+      runId: runRecord.runId,
+      taskId: taskIdToUse,
+      attemptId,
+      data: { commentId, stagedCommentCount: newCount },
+    });
+
+    return { commentId, stagedCommentCount: newCount };
+  }
+
+  /**
+   * Find the first task ID in the run directory.
+   */
+  private async findFirstTaskIdLocked(): Promise<string | undefined> {
+    const tasks = await this.listTasksLocked();
+    return tasks.length > 0 ? tasks[0].taskId : undefined;
   }
 
   // -----------------------------------------------------------------------

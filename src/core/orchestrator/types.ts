@@ -138,6 +138,20 @@ export interface ReconcileResult {
   strictAggregationAllowed: boolean;
 }
 
+export interface CodeCommentInput {
+  taskId?: string;
+  attemptId: string;
+  leaseToken: string;
+  filePath: string;
+  diffFingerprint: string;
+  comment: string;
+}
+
+export interface CodeCommentResult {
+  commentId: string;
+  stagedCommentCount: number;
+}
+
 export interface AuditEvent {
   schemaVersion: 1;
   eventId: string;
