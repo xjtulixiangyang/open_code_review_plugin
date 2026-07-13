@@ -284,7 +284,7 @@ test('schema-1 failed run exits 1 and writes diagnostic report', async () => {
       (err: unknown) => {
         const e = err as { code?: number; stderr?: string };
         assert.equal(e.code, 1);
-        assert.match(e.stderr ?? '', /failed/);
+        assert.match(e.stdout ?? '', /failed/);
         return true;
       },
     );
@@ -393,40 +393,6 @@ test('schema-1 completed run applies filters and relocations', async () => {
   }
 });
 
-test('schema-1 completed run reports partial files for failed tasks', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'ocrp-strict-partial-'));
-  const oldCwd = process.cwd();
-  try {
-    process.chdir(dir);
-    await createSchema1Run(dir, 'run1', 'completed', [
-      { taskId: 'task-0', filePath: 'src/a.ts', taskState: 'succeeded', acceptedAttemptId: 'attempt-1' },
-      { taskId: 'task-1', filePath: 'src/b.ts', taskState: 'failed', failureReason: 'retry_exhausted' },
-    ], [
-      { attemptId: 'attempt-1', state: 'succeeded', outcome: 'findings', stagedCommentCount: 1 },
-    ], [
-      {
-        attemptId: 'attempt-1',
-        records: [
-          { comment_id: 'c-1', path: 'src/a.ts', start_line: 1, end_line: 1, content: 'Issue in a.ts' },
-        ],
-      },
-    ]);
-    process.chdir(oldCwd);
-
-    const { stdout } = await runAggregate(dir, ['--runId', 'run1', '--format', 'both']);
-    const summary = JSON.parse(stdout) as { partial: boolean; partialFiles: string[]; commentCount: number };
-
-    assert.equal(summary.partial, true);
-    assert.deepEqual(summary.partialFiles, ['src/b.ts']);
-    assert.equal(summary.commentCount, 1);
-
-    const reportJson = JSON.parse(await readFile(join(dir, '.ocr-runs/run1/report.json'), 'utf8'));
-    assert.equal(reportJson.status, 'completed_with_warnings');
-  } finally {
-    process.chdir(oldCwd);
-    await rm(dir, { recursive: true, force: true });
-  }
-});
 
 test('schema-1 completed run with no_findings produces empty report', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'ocrp-strict-nofindings-'));
@@ -724,6 +690,85 @@ test('no_findings with non-zero stagedCommentCount fails closed', async () => {
     );
   } finally {
     process.chdir(oldCwd);
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('malformed run.json fails closed instead of using legacy aggregation', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'ocrp-strict-bad-run-'));
+  try {
+    await mkdir(join(dir, '.ocr-runs/run1'), { recursive: true });
+    await writeFile(join(dir, '.ocr-runs/run1/context.json'), JSON.stringify({ ...CTX, runId: 'run1' }));
+    await writeFile(join(dir, '.ocr-runs/run1/run.json'), '{broken');
+    await assert.rejects(
+      () => runAggregate(dir, ['--runId', 'run1', '--format', 'json']),
+      (err: unknown) => {
+        const e = err as { code?: number; stderr?: string };
+        assert.equal(e.code, 2);
+        assert.match(e.stderr ?? '', /run\.json|schema-1/i);
+        return true;
+      },
+    );
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('completed run with a failed task fails closed', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'ocrp-strict-inconsistent-'));
+  try {
+    await createSchema1Run(dir, 'run1', 'completed', [
+      { taskId: 'task-0', filePath: 'src/a.ts', taskState: 'failed', failureReason: 'retry_exhausted' },
+      { taskId: 'task-1', filePath: 'src/b.ts', taskState: 'succeeded', acceptedAttemptId: 'attempt-2' },
+    ], [
+      { attemptId: 'attempt-2', state: 'succeeded', outcome: 'no_findings', stagedCommentCount: 0 },
+    ], []);
+    await assert.rejects(
+      () => runAggregate(dir, ['--runId', 'run1', '--format', 'json']),
+      (err: unknown) => {
+        const e = err as { code?: number; stderr?: string };
+        assert.notEqual(e.code, 0);
+        assert.match(e.stderr ?? '', /completed|task/i);
+        return true;
+      },
+    );
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('failed JSON report lists file, attempts, and reason without writing markdown', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'ocrp-strict-failed-detail-'));
+  try {
+    await createSchema1Run(dir, 'run1', 'failed', [
+      { taskId: 'task-0', filePath: 'src/a.ts', taskState: 'failed', failureReason: 'retry_exhausted' },
+      { taskId: 'task-1', filePath: 'src/b.ts', taskState: 'succeeded', acceptedAttemptId: 'attempt-2' },
+    ], [
+      { attemptId: 'attempt-2', state: 'succeeded', outcome: 'no_findings', stagedCommentCount: 0 },
+    ], []);
+    let stdout = '';
+    await assert.rejects(
+      async () => {
+        try {
+          await runAggregate(dir, ['--runId', 'run1', '--format', 'json']);
+        } catch (error) {
+          stdout = (error as { stdout?: string }).stdout ?? '';
+          throw error;
+        }
+      },
+      (err: unknown) => (err as { code?: number }).code === 1,
+    );
+    const report = JSON.parse(await readFile(join(dir, '.ocr-runs/run1/report.json'), 'utf8'));
+    assert.equal(report.partial, true);
+    assert.deepEqual(report.failedFiles, [{
+      path: 'src/a.ts', attemptsUsed: 1, maxAttempts: 2, reason: 'retry_exhausted',
+    }]);
+    assert.equal(report.expected, 2);
+    assert.equal(report.succeeded, 1);
+    assert.equal(report.failed, 1);
+    assert.equal(JSON.parse(stdout).partial, true);
+    await assert.rejects(() => readFile(join(dir, '.ocr-runs/run1/report.md'), 'utf8'), { code: 'ENOENT' });
+  } finally {
     await rm(dir, { recursive: true, force: true });
   }
 });
