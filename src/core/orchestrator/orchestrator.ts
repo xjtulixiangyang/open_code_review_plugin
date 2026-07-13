@@ -1,5 +1,5 @@
-import { randomBytes, randomUUID } from 'node:crypto';
-import { readdir, readFile, appendFile } from 'node:fs/promises';
+import { randomBytes, randomUUID, createHash } from 'node:crypto';
+import { readdir, readFile, appendFile, mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { withRunLock } from './lock.js';
 import { atomicWriteJson, appendAuditEvent, readJson } from './storage.js';
@@ -10,12 +10,12 @@ import type {
   AttemptRecord,
   ClaimResult,
   ReconcileResult,
-  CodeCommentInput,
-  CodeCommentResult,
   TaskCounts,
   RunState,
   AuditEvent,
 } from './types.js';
+import type { CommentRecord } from '../model/comment.js';
+import type { AttemptCredentials } from './types.js';
 import { ORCHESTRATOR_SCHEMA_VERSION, DEFAULT_MAX_ATTEMPTS, isTaskFilename } from './types.js';
 
 // ---------------------------------------------------------------------------
@@ -145,17 +145,18 @@ export class Orchestrator {
   }
 
   /**
-   * Stage a code comment under a valid lease.
+   * Stage code comments under a valid lease.
    *
-   * Validates that the run is active, the task is running, the attempt
-   * matches, the file path and diff fingerprint match, the lease token
-   * is valid (SHA-256 digest matches), and the lease has not expired.
-   * Appends the comment to a JSONL file and updates the attempt record's
-   * stagedCommentCount atomically under the run lock.
+   * Validates once under one withRunLock: run active, task running,
+   * attempt match, file path match, diff fingerprint match,
+   * SHA-256 lease token digest, unexpired lease deadline.
+   * Then appends all CommentRecords to attempt-comments/<attemptId>.jsonl,
+   * preserving their existing comment_id values.
+   * Returns the comment_ids of all staged records.
    */
-  codeComment(input: CodeCommentInput): Promise<CodeCommentResult> {
+  stageComments(credentials: AttemptCredentials, records: CommentRecord[]): Promise<string[]> {
     return withRunLock(this.runDir, () =>
-      this.codeCommentLocked(input),
+      this.stageCommentsLocked(credentials, records),
     );
   }
 
@@ -501,136 +502,111 @@ export class Orchestrator {
   // Code comment staging
   // -----------------------------------------------------------------------
 
-  private async codeCommentLocked(input: CodeCommentInput): Promise<CodeCommentResult> {
-    const { taskId, attemptId, leaseToken, filePath, diffFingerprint, comment } = input;
-
-    // Validate run is active
+  private async stageCommentsLocked(
+    credentials: AttemptCredentials,
+    records: CommentRecord[],
+  ): Promise<string[]> {
+    // 1. Validate run is active
     const runRecord = await this.readRunRecordLocked();
     if (!runRecord || runRecord.state !== 'active') {
       throw new Error(`Run is not active (state=${runRecord?.state ?? 'missing'})`);
     }
 
-    // Determine schema version for legacy compatibility
-    // schemaVersion === 1 => schema-1 (credentials always required)
-    // schemaVersion undefined/0 => old-schema (legacy mode when no taskId)
-    const isSchema1 = runRecord.schemaVersion === 1;
-    const isLegacy = !taskId && !isSchema1;
-
-    // Read the task record
-    const taskIdToUse = taskId || (await this.findFirstTaskIdLocked());
-    if (!taskIdToUse) {
-      throw new Error('No task found for this run');
-    }
-    const task = await this.readTaskLocked(taskIdToUse);
+    // 2. Read task via credentials.taskId
+    const task = await this.readTaskLocked(credentials.taskId);
     if (!task) {
-      throw new Error(`Task ${taskIdToUse} not found`);
+      throw new Error(`Task ${credentials.taskId} not found`);
     }
 
-    // Validate task is running
+    // 3. Validate task is running
     if (task.state !== 'running') {
-      throw new Error(`Task ${taskIdToUse} is not running (state=${task.state})`);
+      throw new Error(`Task ${credentials.taskId} is not running (state=${task.state})`);
     }
 
-    // Validate attempt ID matches current attempt
-    if (task.currentAttemptId !== attemptId) {
+    // 4. Validate attempt ID matches task.currentAttemptId
+    if (credentials.attemptId !== task.currentAttemptId) {
       throw new Error(
-        `Attempt ID mismatch for task ${taskIdToUse}: expected ${task.currentAttemptId}, got ${attemptId}`,
+        `Attempt ID mismatch: ${credentials.attemptId} !== ${task.currentAttemptId}`,
       );
     }
 
-    // Validate file path
-    if (task.filePath !== filePath) {
-      throw new Error(`File path mismatch: expected ${task.filePath}, got ${filePath}`);
+    // 5. Validate file path matches task.filePath
+    if (credentials.filePath !== task.filePath) {
+      throw new Error(
+        `File path mismatch: ${credentials.filePath} !== ${task.filePath}`,
+      );
     }
 
-    // Validate diff fingerprint
-    if (task.diffFingerprint !== diffFingerprint) {
-      throw new Error(`Diff fingerprint mismatch: expected ${task.diffFingerprint}, got ${diffFingerprint}`);
+    // 6. Validate diff fingerprint matches task.diffFingerprint
+    if (credentials.diffFingerprint !== task.diffFingerprint) {
+      throw new Error(
+        `Diff fingerprint mismatch: ${credentials.diffFingerprint} !== ${task.diffFingerprint}`,
+      );
     }
 
-    // Read the attempt record
-    const attempt = await this.readAttemptLocked(taskIdToUse, attemptId);
+    // 7. Read attempt record
+    const attempt = await this.readAttemptLocked(credentials.taskId, credentials.attemptId);
     if (!attempt) {
-      throw new Error(`Attempt ${attemptId} not found for task ${taskIdToUse}`);
+      throw new Error(`Attempt ${credentials.attemptId} not found for task ${credentials.taskId}`);
     }
 
-    // Validate lease token (SHA-256 digest) — skip for legacy mode
-    if (!isLegacy) {
-      const leaseTokenDigest = sha256(leaseToken);
-      if (attempt.leaseTokenDigest !== leaseTokenDigest) {
-        throw new Error('Invalid lease token: SHA-256 digest does not match');
-      }
-
-      // Validate lease not expired
-      if (Date.parse(attempt.leaseDeadline) <= this.now().getTime()) {
-        throw new Error('Lease has expired');
-      }
+    // 8. Validate lease token SHA-256 digest matches attempt.leaseTokenDigest
+    const tokenDigest = createHash('sha256').update(credentials.leaseToken).digest('hex');
+    if (tokenDigest !== attempt.leaseTokenDigest) {
+      throw new Error('Lease token digest mismatch');
     }
 
-    // Generate comment ID
-    const commentId = randomUUID();
+    // 9. Validate lease not expired
+    if (Date.parse(attempt.leaseDeadline) <= this.now().getTime()) {
+      throw new Error('Lease has expired');
+    }
 
-    // Build JSONL entry
-    const entry = JSON.stringify({
-      commentId,
-      attemptId,
-      filePath,
-      diffFingerprint,
-      comment,
-      createdAt: this.now().toISOString(),
-    });
-
-    // Append to JSONL file
-    const commentsPath = join(this.runDir, TASKS_DIR, `${taskIdToUse}.${attemptId}.comments.jsonl`);
-
-    // Read existing JSONL to recover count
+    // 10. Read existing JSONL from attempt-comments/<attemptId>.jsonl
+    const commentsPath = join(this.runDir, 'attempt-comments', `${credentials.attemptId}.jsonl`);
     let recoveredCount = 0;
     try {
       const existingContent = await readFile(commentsPath, 'utf-8');
-      const lines = existingContent.split('\n').filter(l => l.trim().length > 0);
+      const lines = existingContent.split('\n').filter((l) => l.trim().length > 0);
       for (const line of lines) {
         try {
           JSON.parse(line);
-          recoveredCount++;
         } catch {
-          // Malformed JSONL must fail closed, not be silently skipped
-          throw new Error(`Malformed JSONL in comments file: cannot parse line`);
+          throw new Error(`Malformed JSONL line in ${commentsPath}: ${line}`);
         }
       }
+      recoveredCount = lines.length;
     } catch (err: unknown) {
-      if (err instanceof Error && err.message.startsWith('Malformed JSONL')) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+        // No existing file, that's fine
+      } else {
         throw err;
       }
-      // File doesn't exist yet, that's fine
     }
 
-    // Append the new entry
-    await appendFile(commentsPath, entry + '\n', { encoding: 'utf-8', flag: 'a' });
+    // 11. Ensure attempt-comments dir exists
+    await mkdir(join(this.runDir, 'attempt-comments'), { recursive: true });
 
-    // Update attempt record's stagedCommentCount
-    const newCount = recoveredCount + 1;
+    // 12. Append each record as a JSONL line
+    const jsonlLines = records.map((r) => JSON.stringify(r));
+    await appendFile(commentsPath, jsonlLines.join('\n') + '\n', { encoding: 'utf-8', flag: 'a' });
+
+    // 13. Update attempt.stagedCommentCount
+    const newCount = recoveredCount + records.length;
     attempt.stagedCommentCount = newCount;
     attempt.updatedAt = this.now().toISOString();
     await this.writeAttemptLocked(attempt);
 
-    // Emit audit event (no plaintext lease token)
+    // 14. Emit audit event
     await this.emitAuditEventLocked({
       type: 'comment.staged',
       runId: runRecord.runId,
-      taskId: taskIdToUse,
-      attemptId,
-      data: { commentId, stagedCommentCount: newCount },
+      taskId: credentials.taskId,
+      attemptId: credentials.attemptId,
+      data: { count: records.length, stagedCommentCount: newCount },
     });
 
-    return { commentId, stagedCommentCount: newCount };
-  }
-
-  /**
-   * Find the first task ID in the run directory.
-   */
-  private async findFirstTaskIdLocked(): Promise<string | undefined> {
-    const tasks = await this.listTasksLocked();
-    return tasks.length > 0 ? tasks[0].taskId : undefined;
+    // 15. Return the comment_ids array
+    return records.map((r) => r.comment_id);
   }
 
   // -----------------------------------------------------------------------

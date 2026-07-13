@@ -5,6 +5,8 @@ import { join } from 'node:path';
 import { randomUUID, createHash } from 'node:crypto';
 import { Orchestrator } from '../orchestrator.js';
 import type { RunRecord, TaskRecord, AttemptRecord, ReviewManifest, ManifestFile } from '../types.js';
+import type { AttemptCredentials } from '../types.js';
+import type { CommentRecord } from '../../model/comment.js';
 import { ORCHESTRATOR_SCHEMA_VERSION } from '../types.js';
 import { sha256, manifestDigest } from '../fingerprint.js';
 
@@ -12,11 +14,7 @@ import { sha256, manifestDigest } from '../fingerprint.js';
 // Helpers
 // ---------------------------------------------------------------------------
 
-const TMP_ROOT = '/tmp/orchestrator-code-comment-test';
-
-function sha256hex(s: string): string {
-  return createHash('sha256').update(s).digest('hex');
-}
+const TMP_ROOT = '/tmp/orchestrator-stage-comments-test';
 
 async function tmpDir(): Promise<string> {
   const dir = join(TMP_ROOT, `run-${randomUUID().slice(0, 8)}`);
@@ -37,14 +35,7 @@ interface RunDirResult {
   diffFingerprint: string;
 }
 
-/**
- * Create a run directory with one claimed (leased) task, ready for
- * acknowledgeDispatch and then code_comment.
- */
-async function createRunDirWithClaimedTask(
-  runDir: string,
-  schemaVersion?: number,
-): Promise<RunDirResult> {
+async function createRunDirWithClaimedTask(runDir: string): Promise<RunDirResult> {
   const runId = `test-run-${randomUUID().slice(0, 8)}`;
   const taskId = `task-0`;
   const createdAt = new Date().toISOString();
@@ -71,7 +62,7 @@ async function createRunDirWithClaimedTask(
   };
 
   const runRecord: RunRecord = {
-    schemaVersion: schemaVersion ?? ORCHESTRATOR_SCHEMA_VERSION,
+    schemaVersion: ORCHESTRATOR_SCHEMA_VERSION,
     runId,
     state: 'active',
     manifestDigest: manifestDigest(manifest),
@@ -82,13 +73,9 @@ async function createRunDirWithClaimedTask(
     updatedAt: createdAt,
   };
 
-  // Write manifest
   await writeFile(join(runDir, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n');
-
-  // Write run record
   await writeFile(join(runDir, 'run.json'), JSON.stringify(runRecord, null, 2) + '\n');
 
-  // Write task
   const tasksDir = join(runDir, 'tasks');
   await mkdir(tasksDir, { recursive: true });
 
@@ -106,12 +93,9 @@ async function createRunDirWithClaimedTask(
   };
   await writeFile(join(tasksDir, `${taskId}.json`), JSON.stringify(task, null, 2) + '\n');
 
-  // Claim the task to get a lease
   const orchestrator = new Orchestrator(runDir);
   const claimResults = await orchestrator.claim(1);
   const claim = claimResults[0];
-
-  // Acknowledge dispatch to move to running state
   await orchestrator.acknowledgeDispatch(claim.taskId, claim.attemptId);
 
   return {
@@ -124,18 +108,38 @@ async function createRunDirWithClaimedTask(
   };
 }
 
+function makeComment(overrides?: Partial<CommentRecord>): CommentRecord {
+  return {
+    comment_id: `c-${randomUUID()}`,
+    path: 'src/foo.ts',
+    start_line: 1,
+    end_line: 1,
+    content: 'test comment',
+    _meta: { subagent: 'reviewer-0', ts: new Date().toISOString() },
+    ...overrides,
+  };
+}
+
+function makeCredentials(tr: RunDirResult): AttemptCredentials {
+  return {
+    taskId: tr.taskId,
+    attemptId: tr.attemptId,
+    leaseToken: tr.leaseToken,
+    filePath: tr.filePath,
+    diffFingerprint: tr.diffFingerprint,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
-describe('Orchestrator codeComment', () => {
+describe('Orchestrator stageComments', () => {
   describe('validation', () => {
     it('rejects when run is not active', async () => {
       const runDir = await tmpDir();
-      const { runId, taskId, attemptId, leaseToken, filePath, diffFingerprint } =
-        await createRunDirWithClaimedTask(runDir);
+      const tr = await createRunDirWithClaimedTask(runDir);
 
-      // Manually set run state to completed
       const runPath = join(runDir, 'run.json');
       const runData = JSON.parse(await readFile(runPath, 'utf-8'));
       runData.state = 'completed';
@@ -143,14 +147,7 @@ describe('Orchestrator codeComment', () => {
 
       const orchestrator = new Orchestrator(runDir);
       await assert.rejects(
-        () => orchestrator.codeComment({
-          taskId,
-          attemptId,
-          leaseToken,
-          filePath,
-          diffFingerprint,
-          comment: 'test',
-        }),
+        () => orchestrator.stageComments(makeCredentials(tr), [makeComment()]),
         { message: /run.*not active/i },
       );
 
@@ -159,47 +156,33 @@ describe('Orchestrator codeComment', () => {
 
     it('rejects when task is not running', async () => {
       const runDir = await tmpDir();
-      const { runId, taskId, attemptId, leaseToken, filePath, diffFingerprint } =
-        await createRunDirWithClaimedTask(runDir);
+      const tr = await createRunDirWithClaimedTask(runDir);
 
-      // Manually set task state back to queued
       const tasksDir = join(runDir, 'tasks');
-      const taskPath = join(tasksDir, `${taskId}.json`);
+      const taskPath = join(tasksDir, `${tr.taskId}.json`);
       const taskData = JSON.parse(await readFile(taskPath, 'utf-8'));
       taskData.state = 'queued';
       await writeFile(taskPath, JSON.stringify(taskData, null, 2) + '\n');
 
       const orchestrator = new Orchestrator(runDir);
       await assert.rejects(
-        () => orchestrator.codeComment({
-          taskId,
-          attemptId,
-          leaseToken,
-          filePath,
-          diffFingerprint,
-          comment: 'test',
-        }),
-        { message: /task.*not running/i },
+        () => orchestrator.stageComments(makeCredentials(tr), [makeComment()]),
+        { message: /not running/i },
       );
 
       await cleanup(runDir);
     });
 
-    it('rejects when attempt ID does not match current attempt', async () => {
+    it('rejects when attempt ID does not match', async () => {
       const runDir = await tmpDir();
-      const { runId, taskId, attemptId, leaseToken, filePath, diffFingerprint } =
-        await createRunDirWithClaimedTask(runDir);
+      const tr = await createRunDirWithClaimedTask(runDir);
 
       const orchestrator = new Orchestrator(runDir);
       await assert.rejects(
-        () => orchestrator.codeComment({
-          taskId,
-          attemptId: 'wrong-attempt',
-          leaseToken,
-          filePath,
-          diffFingerprint,
-          comment: 'test',
-        }),
+        () => orchestrator.stageComments(
+          { ...makeCredentials(tr), attemptId: 'wrong-attempt' },
+          [makeComment()],
+        ),
         { message: /attempt.*mismatch/i },
       );
 
@@ -208,19 +191,14 @@ describe('Orchestrator codeComment', () => {
 
     it('rejects when file path does not match', async () => {
       const runDir = await tmpDir();
-      const { runId, taskId, attemptId, leaseToken, filePath, diffFingerprint } =
-        await createRunDirWithClaimedTask(runDir);
+      const tr = await createRunDirWithClaimedTask(runDir);
 
       const orchestrator = new Orchestrator(runDir);
       await assert.rejects(
-        () => orchestrator.codeComment({
-          taskId,
-          attemptId,
-          leaseToken,
-          filePath: 'wrong/path.ts',
-          diffFingerprint,
-          comment: 'test',
-        }),
+        () => orchestrator.stageComments(
+          { ...makeCredentials(tr), filePath: 'wrong/path.ts' },
+          [makeComment()],
+        ),
         { message: /file path.*mismatch/i },
       );
 
@@ -229,41 +207,31 @@ describe('Orchestrator codeComment', () => {
 
     it('rejects when diff fingerprint does not match', async () => {
       const runDir = await tmpDir();
-      const { runId, taskId, attemptId, leaseToken, filePath } =
-        await createRunDirWithClaimedTask(runDir);
+      const tr = await createRunDirWithClaimedTask(runDir);
 
       const orchestrator = new Orchestrator(runDir);
       await assert.rejects(
-        () => orchestrator.codeComment({
-          taskId,
-          attemptId,
-          leaseToken,
-          filePath,
-          diffFingerprint: 'wrong-fingerprint',
-          comment: 'test',
-        }),
+        () => orchestrator.stageComments(
+          { ...makeCredentials(tr), diffFingerprint: 'wrong-fingerprint' },
+          [makeComment()],
+        ),
         { message: /diff.*mismatch/i },
       );
 
       await cleanup(runDir);
     });
 
-    it('rejects invalid lease token (wrong SHA-256)', async () => {
+    it('rejects invalid lease token', async () => {
       const runDir = await tmpDir();
-      const { runId, taskId, attemptId, filePath, diffFingerprint } =
-        await createRunDirWithClaimedTask(runDir);
+      const tr = await createRunDirWithClaimedTask(runDir);
 
       const orchestrator = new Orchestrator(runDir);
       await assert.rejects(
-        () => orchestrator.codeComment({
-          taskId,
-          attemptId,
-          leaseToken: 'invalid-token',
-          filePath,
-          diffFingerprint,
-          comment: 'test',
-        }),
-        { message: /invalid.*lease.*token/i },
+        () => orchestrator.stageComments(
+          { ...makeCredentials(tr), leaseToken: 'invalid-token' },
+          [makeComment()],
+        ),
+        { message: /lease.*token.*mismatch|digest.*mismatch/i },
       );
 
       await cleanup(runDir);
@@ -271,22 +239,13 @@ describe('Orchestrator codeComment', () => {
 
     it('rejects expired lease', async () => {
       const runDir = await tmpDir();
-      const { runId, taskId, attemptId, leaseToken, filePath, diffFingerprint } =
-        await createRunDirWithClaimedTask(runDir);
+      const tr = await createRunDirWithClaimedTask(runDir);
 
-      // Advance clock past lease deadline
-      const clock = new FakeClock(Date.now() + 1_800_000); // 30 min later
+      const clock = new FakeClock(Date.now() + 1_800_000);
       const orchestrator = new Orchestrator(runDir, { now: () => clock.now() });
 
       await assert.rejects(
-        () => orchestrator.codeComment({
-          taskId,
-          attemptId,
-          leaseToken,
-          filePath,
-          diffFingerprint,
-          comment: 'test',
-        }),
+        () => orchestrator.stageComments(makeCredentials(tr), [makeComment()]),
         { message: /lease.*expired/i },
       );
 
@@ -295,89 +254,95 @@ describe('Orchestrator codeComment', () => {
   });
 
   describe('successful comment staging', () => {
-    it('appends a comment and updates stagedCommentCount', async () => {
+    it('appends a single comment and updates stagedCommentCount', async () => {
       const runDir = await tmpDir();
-      const { runId, taskId, attemptId, leaseToken, filePath, diffFingerprint } =
-        await createRunDirWithClaimedTask(runDir);
+      const tr = await createRunDirWithClaimedTask(runDir);
 
       const orchestrator = new Orchestrator(runDir);
-      const result = await orchestrator.codeComment({
-        taskId,
-        attemptId,
-        leaseToken,
-        filePath,
-        diffFingerprint,
-        comment: 'first comment',
-      });
+      const ids = await orchestrator.stageComments(makeCredentials(tr), [makeComment()]);
 
-      assert.ok(result.commentId);
-      assert.equal(result.stagedCommentCount, 1);
+      assert.equal(ids.length, 1);
+      assert.ok(ids[0]);
 
-      // Verify attempt record has updated count
-      const tasksDir = join(runDir, 'tasks');
-      const attemptPath = join(tasksDir, `${taskId}.${attemptId}.json`);
+      const attemptPath = join(runDir, 'tasks', `${tr.taskId}.${tr.attemptId}.json`);
       const attemptData = JSON.parse(await readFile(attemptPath, 'utf-8')) as AttemptRecord;
       assert.equal(attemptData.stagedCommentCount, 1);
 
       await cleanup(runDir);
     });
 
-    it('appends multiple comments and increments count', async () => {
+    it('appends multiple comments at once and increments count', async () => {
       const runDir = await tmpDir();
-      const { runId, taskId, attemptId, leaseToken, filePath, diffFingerprint } =
-        await createRunDirWithClaimedTask(runDir);
+      const tr = await createRunDirWithClaimedTask(runDir);
 
       const orchestrator = new Orchestrator(runDir);
+      const ids = await orchestrator.stageComments(makeCredentials(tr), [
+        makeComment({ comment_id: 'c-1', content: 'first' }),
+        makeComment({ comment_id: 'c-2', content: 'second' }),
+        makeComment({ comment_id: 'c-3', content: 'third' }),
+      ]);
 
-      const r1 = await orchestrator.codeComment({
-        taskId, attemptId, leaseToken, filePath, diffFingerprint,
-        comment: 'first',
-      });
-      assert.equal(r1.stagedCommentCount, 1);
+      assert.equal(ids.length, 3);
+      assert.deepEqual(ids, ['c-1', 'c-2', 'c-3']);
 
-      const r2 = await orchestrator.codeComment({
-        taskId, attemptId, leaseToken, filePath, diffFingerprint,
-        comment: 'second',
-      });
-      assert.equal(r2.stagedCommentCount, 2);
-
-      const r3 = await orchestrator.codeComment({
-        taskId, attemptId, leaseToken, filePath, diffFingerprint,
-        comment: 'third',
-      });
-      assert.equal(r3.stagedCommentCount, 3);
-
-      // Verify JSONL file has 3 entries
-      const commentsPath = join(runDir, 'tasks', `${taskId}.${attemptId}.comments.jsonl`);
+      const commentsPath = join(runDir, 'attempt-comments', `${tr.attemptId}.jsonl`);
       const content = await readFile(commentsPath, 'utf-8');
       const lines = content.trim().split('\n').filter(l => l.length > 0);
       assert.equal(lines.length, 3);
 
-      // Verify attempt record
-      const attemptPath = join(runDir, 'tasks', `${taskId}.${attemptId}.json`);
+      const attemptPath = join(runDir, 'tasks', `${tr.taskId}.${tr.attemptId}.json`);
       const attemptData = JSON.parse(await readFile(attemptPath, 'utf-8')) as AttemptRecord;
       assert.equal(attemptData.stagedCommentCount, 3);
 
       await cleanup(runDir);
     });
 
-    it('returns unique comment IDs for each call', async () => {
+    it('preserves existing comment_id values', async () => {
       const runDir = await tmpDir();
-      const { runId, taskId, attemptId, leaseToken, filePath, diffFingerprint } =
-        await createRunDirWithClaimedTask(runDir);
+      const tr = await createRunDirWithClaimedTask(runDir);
+
+      const orchestrator = new Orchestrator(runDir);
+      const ids = await orchestrator.stageComments(makeCredentials(tr), [
+        makeComment({ comment_id: 'my-custom-id-1' }),
+        makeComment({ comment_id: 'my-custom-id-2' }),
+      ]);
+
+      assert.deepEqual(ids, ['my-custom-id-1', 'my-custom-id-2']);
+
+      const commentsPath = join(runDir, 'attempt-comments', `${tr.attemptId}.jsonl`);
+      const content = await readFile(commentsPath, 'utf-8');
+      const lines = content.trim().split('\n').filter(l => l.length > 0);
+      assert.equal(JSON.parse(lines[0]).comment_id, 'my-custom-id-1');
+      assert.equal(JSON.parse(lines[1]).comment_id, 'my-custom-id-2');
+
+      await cleanup(runDir);
+    });
+
+    it('appends multiple calls preserving all comments', async () => {
+      const runDir = await tmpDir();
+      const tr = await createRunDirWithClaimedTask(runDir);
 
       const orchestrator = new Orchestrator(runDir);
 
-      const r1 = await orchestrator.codeComment({
-        taskId, attemptId, leaseToken, filePath, diffFingerprint,
-        comment: 'first',
-      });
-      const r2 = await orchestrator.codeComment({
-        taskId, attemptId, leaseToken, filePath, diffFingerprint,
-        comment: 'second',
-      });
+      const ids1 = await orchestrator.stageComments(makeCredentials(tr), [
+        makeComment({ comment_id: 'c-1', content: 'first' }),
+      ]);
+      assert.equal(ids1.length, 1);
 
-      assert.notEqual(r1.commentId, r2.commentId);
+      const ids2 = await orchestrator.stageComments(makeCredentials(tr), [
+        makeComment({ comment_id: 'c-2', content: 'second' }),
+        makeComment({ comment_id: 'c-3', content: 'third' }),
+      ]);
+      assert.equal(ids2.length, 2);
+
+      const commentsPath = join(runDir, 'attempt-comments', `${tr.attemptId}.jsonl`);
+      const content = await readFile(commentsPath, 'utf-8');
+      const lines = content.trim().split('\n').filter(l => l.length > 0);
+      assert.equal(lines.length, 3);
+
+      const attemptPath = join(runDir, 'tasks', `${tr.taskId}.${tr.attemptId}.json`);
+      const attemptData = JSON.parse(await readFile(attemptPath, 'utf-8')) as AttemptRecord;
+      assert.equal(attemptData.stagedCommentCount, 3);
 
       await cleanup(runDir);
     });
@@ -386,69 +351,39 @@ describe('Orchestrator codeComment', () => {
   describe('JSONL recovery', () => {
     it('recovers stagedCommentCount from existing valid JSONL', async () => {
       const runDir = await tmpDir();
-      const { runId, taskId, attemptId, leaseToken, filePath, diffFingerprint } =
-        await createRunDirWithClaimedTask(runDir);
+      const tr = await createRunDirWithClaimedTask(runDir);
 
-      // Pre-populate JSONL with 2 entries
-      const tasksDir = join(runDir, 'tasks');
-      const commentsPath = join(tasksDir, `${taskId}.${attemptId}.comments.jsonl`);
-      const existingEntry = JSON.stringify({ commentId: 'existing-1', text: 'existing' });
-      await writeFile(commentsPath, existingEntry + '\n');
+      const commentsDir = join(runDir, 'attempt-comments');
+      await mkdir(commentsDir, { recursive: true });
+      const commentsPath = join(commentsDir, `${tr.attemptId}.jsonl`);
+      await writeFile(commentsPath, JSON.stringify({ comment_id: 'existing-1' }) + '\n');
 
       const orchestrator = new Orchestrator(runDir);
-      const result = await orchestrator.codeComment({
-        taskId, attemptId, leaseToken, filePath, diffFingerprint,
-        comment: 'new',
-      });
+      const ids = await orchestrator.stageComments(makeCredentials(tr), [
+        makeComment({ comment_id: 'new-1' }),
+      ]);
 
-      // 1 existing + 1 new = 2
-      assert.equal(result.stagedCommentCount, 2);
+      assert.equal(ids.length, 1);
 
-      await cleanup(runDir);
-    });
-
-    it('recovers count from multiple existing JSONL lines', async () => {
-      const runDir = await tmpDir();
-      const { runId, taskId, attemptId, leaseToken, filePath, diffFingerprint } =
-        await createRunDirWithClaimedTask(runDir);
-
-      // Pre-populate JSONL with 3 entries
-      const tasksDir = join(runDir, 'tasks');
-      const commentsPath = join(tasksDir, `${taskId}.${attemptId}.comments.jsonl`);
-      const lines = [
-        JSON.stringify({ commentId: 'c1' }),
-        JSON.stringify({ commentId: 'c2' }),
-        JSON.stringify({ commentId: 'c3' }),
-      ].join('\n');
-      await writeFile(commentsPath, lines + '\n');
-
-      const orchestrator = new Orchestrator(runDir);
-      const result = await orchestrator.codeComment({
-        taskId, attemptId, leaseToken, filePath, diffFingerprint,
-        comment: 'new',
-      });
-
-      assert.equal(result.stagedCommentCount, 4); // 3 + 1
+      const attemptPath = join(runDir, 'tasks', `${tr.taskId}.${tr.attemptId}.json`);
+      const attemptData = JSON.parse(await readFile(attemptPath, 'utf-8')) as AttemptRecord;
+      assert.equal(attemptData.stagedCommentCount, 2);
 
       await cleanup(runDir);
     });
 
     it('fails closed on malformed JSONL', async () => {
       const runDir = await tmpDir();
-      const { runId, taskId, attemptId, leaseToken, filePath, diffFingerprint } =
-        await createRunDirWithClaimedTask(runDir);
+      const tr = await createRunDirWithClaimedTask(runDir);
 
-      // Write malformed JSONL
-      const tasksDir = join(runDir, 'tasks');
-      const commentsPath = join(tasksDir, `${taskId}.${attemptId}.comments.jsonl`);
+      const commentsDir = join(runDir, 'attempt-comments');
+      await mkdir(commentsDir, { recursive: true });
+      const commentsPath = join(commentsDir, `${tr.attemptId}.jsonl`);
       await writeFile(commentsPath, 'not-json\n');
 
       const orchestrator = new Orchestrator(runDir);
       await assert.rejects(
-        () => orchestrator.codeComment({
-          taskId, attemptId, leaseToken, filePath, diffFingerprint,
-          comment: 'test',
-        }),
+        () => orchestrator.stageComments(makeCredentials(tr), [makeComment()]),
         { message: /malformed/i },
       );
 
@@ -457,24 +392,21 @@ describe('Orchestrator codeComment', () => {
 
     it('fails closed when any line in JSONL is malformed', async () => {
       const runDir = await tmpDir();
-      const { runId, taskId, attemptId, leaseToken, filePath, diffFingerprint } =
-        await createRunDirWithClaimedTask(runDir);
+      const tr = await createRunDirWithClaimedTask(runDir);
 
-      const tasksDir = join(runDir, 'tasks');
-      const commentsPath = join(tasksDir, `${taskId}.${attemptId}.comments.jsonl`);
+      const commentsDir = join(runDir, 'attempt-comments');
+      await mkdir(commentsDir, { recursive: true });
+      const commentsPath = join(commentsDir, `${tr.attemptId}.jsonl`);
       const lines = [
-        JSON.stringify({ commentId: 'c1' }),
+        JSON.stringify({ comment_id: 'c1' }),
         'bad-json-line',
-        JSON.stringify({ commentId: 'c3' }),
+        JSON.stringify({ comment_id: 'c3' }),
       ].join('\n');
       await writeFile(commentsPath, lines + '\n');
 
       const orchestrator = new Orchestrator(runDir);
       await assert.rejects(
-        () => orchestrator.codeComment({
-          taskId, attemptId, leaseToken, filePath, diffFingerprint,
-          comment: 'test',
-        }),
+        () => orchestrator.stageComments(makeCredentials(tr), [makeComment()]),
         { message: /malformed/i },
       );
 
@@ -483,20 +415,14 @@ describe('Orchestrator codeComment', () => {
   });
 
   describe('token and event non-leakage', () => {
-    it('does not leak plaintext lease token in stored JSONL', async () => {
+    it('does not leak lease token in stored JSONL', async () => {
       const runDir = await tmpDir();
-      const { runId, taskId, attemptId, leaseToken, filePath, diffFingerprint } =
-        await createRunDirWithClaimedTask(runDir);
+      const tr = await createRunDirWithClaimedTask(runDir);
 
       const orchestrator = new Orchestrator(runDir);
-      await orchestrator.codeComment({
-        taskId, attemptId, leaseToken, filePath, diffFingerprint,
-        comment: 'test',
-      });
+      await orchestrator.stageComments(makeCredentials(tr), [makeComment()]);
 
-      // Read the JSONL file - should not contain the lease token
-      const tasksDir = join(runDir, 'tasks');
-      const commentsPath = join(tasksDir, `${taskId}.${attemptId}.comments.jsonl`);
+      const commentsPath = join(runDir, 'attempt-comments', `${tr.attemptId}.jsonl`);
       const content = await readFile(commentsPath, 'utf-8');
       const parsed = JSON.parse(content.trim().split('\n')[0]);
 
@@ -506,31 +432,18 @@ describe('Orchestrator codeComment', () => {
       await cleanup(runDir);
     });
 
-    it('does not leak plaintext lease token in result', async () => {
+    it('returns only comment_ids array', async () => {
       const runDir = await tmpDir();
-      const { runId, taskId, attemptId, leaseToken, filePath, diffFingerprint } =
-        await createRunDirWithClaimedTask(runDir);
+      const tr = await createRunDirWithClaimedTask(runDir);
 
       const orchestrator = new Orchestrator(runDir);
-      const result = await orchestrator.codeComment({
-        taskId, attemptId, leaseToken, filePath, diffFingerprint,
-        comment: 'test',
-      });
+      const ids = await orchestrator.stageComments(makeCredentials(tr), [makeComment()]);
 
-      // Result should only contain commentId and stagedCommentCount
-      assert.ok(result.commentId);
-      assert.equal(typeof result.stagedCommentCount, 'number');
-      assert.equal(Object.keys(result).length, 2);
+      assert.ok(Array.isArray(ids));
+      assert.equal(ids.length, 1);
 
       await cleanup(runDir);
     });
-  });
-
-  describe('legacy compatibility', () => {
-    // Legacy mode applies only to old-schema runs (schemaVersion undefined/0)
-    // without a taskId. Since this orchestrator always creates schemaVersion: 1
-    // runs, legacy mode is not exercised here. The credential validation is
-    // always enforced.
   });
 });
 
