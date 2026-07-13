@@ -121,3 +121,15 @@ export interface ReconcileResult {
   nextLeaseDeadline?: string;
   strictAggregationAllowed: boolean;
 }
+
+export interface AuditEvent {
+  schemaVersion: 1;
+  eventId: string;
+  type: string;
+  ts: string;
+  runId: string;
+  taskId?: string;
+  attemptId?: string;
+  reason?: string;
+  data?: unknown;
+}
