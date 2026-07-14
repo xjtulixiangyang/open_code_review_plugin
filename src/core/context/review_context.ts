@@ -47,6 +47,12 @@ export async function buildReviewContext(req: ReviewRequest): Promise<ReviewCont
   const scopedFiles: FileChange[] = [];
 
   for (const f of files) {
+    // Runtime artifacts are never review inputs, even when they are untracked
+    // and a custom include pattern would otherwise match them.
+    if (f.path === '.ocr-runs' || f.path.startsWith('.ocr-runs/')) {
+      excludedFiles.push({ path: f.path, reason: 'runtime-artifact' });
+      continue;
+    }
     const scope = isFileInScope(f.path, customRules);
     if (!scope.allowed) {
       excludedFiles.push({ path: f.path, reason: scope.reason });

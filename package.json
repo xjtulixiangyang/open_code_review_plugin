@@ -49,5 +49,8 @@
     "tsx": "^4.16.0",
     "typescript": "^5.5.0",
     "vitest": "^4.1.10"
+  },
+  "dependencies": {
+    "write-file-atomic": "^5.0.1"
   }
 }

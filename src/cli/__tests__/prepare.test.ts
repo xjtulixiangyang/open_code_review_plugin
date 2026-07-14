@@ -6,6 +6,7 @@ import { promisify } from 'node:util';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { parseArgs } from '../prepare.js';
+import type { LaunchConfig } from '../../core/orchestrator/types.js';
 
 const execFileAsync = promisify(execFile);
 const ROOT = process.cwd();
@@ -16,6 +17,28 @@ async function runPrepare(cwd: string, args: string[]) {
     cwd,
   });
 }
+
+test('ocr-prepare excludes .ocr-runs runtime artifacts from workspace review', async () => {
+  const repo = await mkdtemp(join(tmpdir(), 'ocrp-prepare-artifacts-'));
+  try {
+    await execFileAsync('git', ['init'], { cwd: repo });
+    await execFileAsync('git', ['config', 'user.email', 'test@test'], { cwd: repo });
+    await execFileAsync('git', ['config', 'user.name', 'Test'], { cwd: repo });
+    await writeFile(join(repo, 'a.ts'), 'export const a = 1;\n');
+    await execFileAsync('git', ['add', 'a.ts'], { cwd: repo });
+    await execFileAsync('git', ['commit', '-m', 'init'], { cwd: repo });
+    await writeFile(join(repo, 'a.ts'), 'export const a = 2;\n');
+    const first = JSON.parse((await runPrepare(repo, [])).stdout);
+    const second = JSON.parse((await runPrepare(repo, [])).stdout);
+    const context = JSON.parse(await readFile(join(repo, second.contextPath), 'utf8'));
+    assert.equal(first.fileCount, 1);
+    assert.equal(second.fileCount, 1);
+    assert.deepEqual(context.files.map((file: { path: string }) => file.path), ['a.ts']);
+    assert.ok(context.excludedFiles.some((file: { path: string }) => file.path.startsWith('.ocr-runs/')));
+  } finally {
+    await rm(repo, { recursive: true, force: true });
+  }
+});
 
 test('ocr-prepare accepts --rules and stores rulesPath', async () => {
   const repo = await mkdtemp(join(tmpdir(), 'ocrp-prepare-'));
@@ -122,6 +145,35 @@ test('ocr-prepare --plans writes custom plans guidance into context and summary'
     const ctx = JSON.parse(await readFile(contextPath, 'utf8'));
     assert.equal(ctx.plansGuidanceSource, 'plans.md');
     assert.equal(ctx.plansGuidanceText, 'custom plan guidance');
+  } finally {
+    await rm(repo, { recursive: true, force: true });
+  }
+});
+
+test('ocr-prepare writes normalized launch.json with concurrency, leaseDurationMs, maxAttempts, no resumeRunId', async () => {
+  const repo = await mkdtemp(join(tmpdir(), 'ocrp-prepare-'));
+  try {
+    await execFileAsync('git', ['init'], { cwd: repo });
+    await execFileAsync('git', ['config', 'user.email', 'test@test'], { cwd: repo });
+    await execFileAsync('git', ['config', 'user.name', 'Test'], { cwd: repo });
+    await execFileAsync('git', ['commit', '--allow-empty', '-m', 'init'], { cwd: repo });
+    await writeFile(join(repo, 'custom.json'), JSON.stringify({ rules: [] }));
+
+    const { stdout } = await runPrepare(repo, ['--concurrency', '3']);
+    const summary = JSON.parse(stdout);
+
+    const launchPath = join(repo, '.ocr-runs', summary.runId, 'launch.json');
+    const launch: LaunchConfig = JSON.parse(await readFile(launchPath, 'utf8'));
+
+    assert.equal(launch.schemaVersion, 1);
+    assert.equal(launch.concurrency, 3);
+    assert.equal(launch.leaseDurationMs, 900_000);
+    assert.equal(launch.maxAttempts, 2);
+    assert.equal(launch.mode, 'workspace');
+    // resumeRunId, preview, dryRun must not appear in launch config
+    assert.equal((launch as Record<string, unknown>).resumeRunId, undefined);
+    assert.equal((launch as Record<string, unknown>).preview, undefined);
+    assert.equal((launch as Record<string, unknown>).dryRun, undefined);
   } finally {
     await rm(repo, { recursive: true, force: true });
   }

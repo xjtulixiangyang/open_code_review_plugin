@@ -1,7 +1,7 @@
 #!/usr/bin/env node
-import { readContext, readComments, safePathKey, writeFilterResult } from '../core/runs/store.js';
+import { readContext, safePathKey, writeFilterResult } from '../core/runs/store.js';
+import { readReviewComments } from '../core/orchestrator/comments.js';
 import type { ReviewContext } from '../core/model/request.js';
-import type { CommentRecord } from '../core/model/comment.js';
 import type { FilterDecision, FilterFileResult } from '../core/model/filter.js';
 
 function parseFlags(argv: string[]): Record<string, string> {
@@ -59,7 +59,7 @@ async function main(): Promise<void> {
   const allowedPaths = new Set(ctx.files.map((file) => file.path));
   if (!allowedPaths.has(f.path)) fail(2, `OCRP-FILTER-071: path is not in review context: ${f.path}`);
 
-  const comments = await readComments<CommentRecord>(f.runId);
+  const comments = await readReviewComments(f.runId);
   const validIds = new Set(comments.filter((c) => c.path === f.path).map((c) => c.comment_id));
   const decisions = parsed.decisions.filter((d) => validIds.has(d.comment_id));
 
