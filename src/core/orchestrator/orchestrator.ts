@@ -240,6 +240,7 @@ export class Orchestrator {
       // Update task record
       task.state = 'leased';
       task.currentAttemptId = attemptId;
+      task.attemptsUsed += 1;
       task.updatedAt = now;
       await this.writeTaskLocked(task);
 
@@ -299,20 +300,19 @@ export class Orchestrator {
       );
     }
 
+    const attempt = await this.readAttemptLocked(taskId, attemptId);
+    if (!attempt || attempt.runId !== task.runId || attempt.taskId !== taskId || attempt.attemptId !== attemptId || attempt.state !== 'leased') {
+      throw new Error(`Attempt ${attemptId} is missing or inconsistent for task ${taskId}`);
+    }
+
     const now = this.now().toISOString();
     task.state = 'running';
-    // currentAttemptId is preserved (still points to the accepted attempt)
-    // acceptedAttemptId is NOT set here — that field is for successful completion (Task 7)
+    // currentAttemptId is preserved; acceptedAttemptId is completion-only.
     task.updatedAt = now;
+    attempt.state = 'running';
+    attempt.updatedAt = now;
+    await this.writeAttemptLocked(attempt);
     await this.writeTaskLocked(task);
-
-    // Update attempt record
-    const attempt = await this.readAttemptLocked(taskId, attemptId);
-    if (attempt) {
-      attempt.state = 'running';
-      attempt.updatedAt = now;
-      await this.writeAttemptLocked(attempt);
-    }
 
     await this.emitAuditEventLocked({
       type: 'dispatch.acknowledged',
@@ -362,8 +362,7 @@ export class Orchestrator {
       await this.writeAttemptLocked(attempt);
     }
 
-    // Consume one attempt
-    task.attemptsUsed += 1;
+    // The attempt budget was consumed when this attempt was claimed.
     task.currentAttemptId = undefined;
     task.failureReason = reason;
     task.updatedAt = now;
@@ -478,6 +477,9 @@ export class Orchestrator {
         `[OCRP-ORCH-INVALID-COMPLETION] Run is not active (state=${runRecord?.state ?? 'missing'})`,
       );
     }
+    if (runRecord.runId !== runId || task.runId !== runId) {
+      throw new Error(`[OCRP-ORCH-INVALID-COMPLETION] Run ID mismatch`);
+    }
 
     // 5. Validate task is running
     if (task.state !== 'running') {
@@ -513,6 +515,12 @@ export class Orchestrator {
       throw new Error(
         `[OCRP-ORCH-INVALID-COMPLETION] Attempt ${attemptId} not found for task ${taskId}`,
       );
+    }
+    if (attempt.runId !== runId || attempt.taskId !== taskId || attempt.attemptId !== attemptId) {
+      throw new Error(`[OCRP-ORCH-INVALID-COMPLETION] Attempt cross-reference mismatch`);
+    }
+    if (attempt.state !== 'running') {
+      throw new Error(`[OCRP-ORCH-INVALID-COMPLETION] Attempt is not running (state=${attempt.state})`);
     }
 
     // 10. Validate lease token SHA-256 digest matches attempt.leaseTokenDigest
