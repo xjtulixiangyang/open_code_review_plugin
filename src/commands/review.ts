@@ -17,12 +17,19 @@
 
 import { parseArgs, normalizeConcurrency } from '../cli/prepare.js';
 import { buildReviewContext } from '../core/context/review_context.js';
-import { writeContext, writeLaunchConfig, resolveExistingRunDir, readContext, readLaunchConfig } from '../core/runs/store.js';
+import {
+  writeContext, writeLaunchConfig, resolveExistingRunDir,
+  readContext, readLaunchConfig, writeReport, appendComment,
+  readFilterResults, readRelocationResults, readEvents,
+} from '../core/runs/store.js';
 import { startCandidate } from '../core/orchestrator/manifest.js';
 import { Orchestrator } from '../core/orchestrator/orchestrator.js';
 import { DEFAULT_LEASE_DURATION_MS, DEFAULT_MAX_ATTEMPTS } from '../core/orchestrator/types.js';
+import type { TaskRecord } from '../core/orchestrator/types.js';
 import type { LaunchConfig, ClaimResult, TaskCounts, ReconcileResult } from '../core/orchestrator/types.js';
 import type { ReviewRequest, ReviewContext } from '../core/model/request.js';
+import { renderMarkdownReport } from '../core/report/markdown.js';
+import { renderJsonReport } from '../core/report/json.js';
 import { MAX_FILES_PER_RUN } from '../core/prompts/constants.js';
 
 // ---------------------------------------------------------------------------
@@ -54,20 +61,25 @@ interface WaitPhase {
   reRunArgs: string;
 }
 
+interface FailedFileDetail {
+  path: string;
+  attemptsUsed: number;
+  maxAttempts: number;
+  reason: string;
+}
+
 interface DonePhase {
   phase: 'done';
   runId: string;
   effectiveRunId: string;
   success: boolean;
-  /** true when every task succeeded; false means partial/partialFiles exist. */
   partial: boolean;
   fileCount: number;
   taskCounts: TaskCounts;
   reportMdPath?: string;
   reportJsonPath?: string;
   summary: string;
-  /** Non-null when the run failed — lists files that did not complete. */
-  failedFiles?: Array<{ path: string; attemptsUsed: number; maxAttempts: number; reason: string }>;
+  failedFiles?: FailedFileDetail[];
 }
 
 type ReviewOutput = DispatchPhase | WaitPhase | DonePhase;
@@ -86,13 +98,24 @@ function error(message: string, runId?: string): void {
   process.stderr.write(JSON.stringify(err) + '\n');
 }
 
-/**
- * Derive the effective run ID from argv.
- * Returns undefined when this is a fresh invocation (no --runId flag).
- */
 function extractExplicitRunId(argv: string[]): string | undefined {
   const idx = argv.indexOf('--runId');
   return idx >= 0 ? argv[idx + 1] : undefined;
+}
+
+/**
+ * Derive failed file details from authoritative task records.
+ */
+function buildFailedFileDetails(tasks: TaskRecord[]): FailedFileDetail[] {
+  return tasks
+    .filter((t) => t.state === 'failed')
+    .sort((a, b) => a.manifestIndex - b.manifestIndex)
+    .map((t) => ({
+      path: t.filePath,
+      attemptsUsed: t.attemptsUsed,
+      maxAttempts: t.maxAttempts,
+      reason: t.failureReason ?? 'unknown',
+    }));
 }
 
 // ---------------------------------------------------------------------------
@@ -153,7 +176,6 @@ async function prepareAndStart(argv: string[]): Promise<PrepareStartResult> {
   };
   await writeLaunchConfig(ctx.runId, launchConfig);
 
-  // Start the candidate (handles resume vs new)
   const startResult = await startCandidate(ctx.runId);
 
   return {
@@ -185,7 +207,7 @@ async function mainLoop(
 
   // ---- Terminal check ----------------------------------------------------
   if (status.state === 'completed' || status.state === 'failed') {
-    return await aggregatePhase(effectiveRunId, runDir, orch, status);
+    return await aggregatePhase(effectiveRunId, orch, status);
   }
 
   // ---- Read context for file count ---------------------------------------
@@ -225,7 +247,7 @@ async function mainLoop(
   // Reconcile once more to ensure we didn't miss a terminal transition.
   const status2 = await orch.reconcile();
   if (status2.state === 'completed' || status2.state === 'failed') {
-    return await aggregatePhase(effectiveRunId, runDir, orch, status2);
+    return await aggregatePhase(effectiveRunId, orch, status2);
   }
 
   // Should not happen, but guard with a short wait instead of busy-polling.
@@ -242,56 +264,49 @@ async function mainLoop(
 }
 
 // ---------------------------------------------------------------------------
-// Phase: Aggregate
+// Shared filter + relocation pipeline
+// Extracted so review.ts and aggregate.ts can share the same logic.
 // ---------------------------------------------------------------------------
 
-async function aggregatePhase(
+interface ToolCallEvent {
+  type?: string;
+  tool?: string;
+  args?: Record<string, unknown>;
+}
+
+interface FilterRelocationResult {
+  visibleComments: CommentRecord[];
+  hiddenCount: number;
+  relocatedCount: number;
+  relocationFallbackCount: number;
+  filterWarnings: FilterWarning[];
+  relocationWarnings: RelocationWarning[];
+  eventWarnings: Array<{ path: string; reason: string }>;
+}
+
+/**
+ * Apply the filter + relocation pipeline to a set of accepted comments.
+ *
+ * This is the shared canonical pipeline used by both the review.ts engine
+ * and the standalone aggregate.ts CLI. Changes to filter/relocation logic
+ * should be made here.
+ */
+async function applyFilterRelocationPipeline(
   runId: string,
-  runDir: string,
-  orch: Orchestrator,
-  status: ReconcileResult,
-): Promise<DonePhase> {
-  const ctx = await readContext<ReviewContext>(runId);
-
-  // Read accepted comments from the orchestrator
-  const { comments, partialFiles } = await orch.readAcceptedComments();
-
-  // Build summary
-  const total = ctx.files.length;
-  const succeeded = status.taskCounts.succeeded;
-  const failed = status.taskCounts.failed;
-  const success = status.state === 'completed';
-  const commentCount = comments.length;
-
-  let summary: string;
-  if (success) {
-    summary = commentCount > 0
-      ? `${succeeded}/${total} files reviewed — ${commentCount} finding(s)`
-      : `${succeeded}/${total} files reviewed — no findings`;
-  } else {
-    summary = `${succeeded}/${total} files succeeded, ${failed}/${total} failed — ${commentCount} finding(s) across succeeded files (PARTIAL)`;
-  }
-
-  // Render reports using the core renderers directly.
-  // We import and call programmatically instead of shelling out.
-  const { renderMarkdownReport } = await import('../core/report/markdown.js');
-  const { renderJsonReport } = await import('../core/report/json.js');
-  const { writeReport } = await import('../core/runs/store.js');
-
-  // Read filter & relocation results for the report pipeline
-  const { readFilterResults, readRelocationResults, readEvents } =
-    await import('../core/runs/store.js');
+  ctx: ReviewContext,
+  comments: CommentRecord[],
+): Promise<FilterRelocationResult> {
   const filters = await readFilterResults(runId);
   const relocationData = await readRelocationResults(runId);
   const events = await readEvents<ToolCallEvent>(runId);
 
   // ---- Event warnings ----------------------------------------------------
-  const warnings: Array<{ path: string; reason: string }> = [];
+  const eventWarnings: Array<{ path: string; reason: string }> = [];
   for (const event of events) {
     if (event.type !== 'tool_call' || event.tool !== 'code_comment') continue;
     const args = event.args ?? {};
     if (typeof args.path !== 'string' || typeof args.subagent !== 'string') {
-      warnings.push({
+      eventWarnings.push({
         path: typeof args.path === 'string' ? args.path : '<unknown>',
         reason: 'malformed code_comment tool call: missing parsed path/subagent',
       });
@@ -302,7 +317,7 @@ async function aggregatePhase(
   const contextPaths = new Set(ctx.files.map((f) => f.path));
   const commentById = new Map(comments.map((c) => [c.comment_id, c]));
   const hiddenIds = new Set<string>();
-  const filterWarnings = [...filters.warnings];
+  const filterWarnings: FilterWarning[] = [...filters.warnings];
   for (const result of filters.results) {
     if (!contextPaths.has(result.path)) {
       filterWarnings.push({ kind: 'filter_path_out_of_scope', path: result.path, detail: 'filter result path is not in review context' });
@@ -323,10 +338,10 @@ async function aggregatePhase(
   }
 
   const visibleComments = comments.filter((c) => !hiddenIds.has(c.comment_id));
-  const filteredCommentCount = comments.length - visibleComments.length;
+  const hiddenCount = comments.length - visibleComments.length;
 
   // ---- Relocation pipeline -----------------------------------------------
-  const relocationWarnings = [...relocationData.warnings];
+  const relocationWarnings: RelocationWarning[] = [...relocationData.warnings];
   let relocatedCount = 0;
   let relocationFallbackCount = 0;
 
@@ -373,30 +388,72 @@ async function aggregatePhase(
     }
   }
 
+  return {
+    visibleComments,
+    hiddenCount,
+    relocatedCount,
+    relocationFallbackCount,
+    filterWarnings,
+    relocationWarnings,
+    eventWarnings,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Phase: Aggregate
+// ---------------------------------------------------------------------------
+
+import type { CommentRecord } from '../core/model/comment.js';
+import type { FilterWarning } from '../core/model/filter.js';
+import type { RelocationWarning } from '../core/model/relocation.js';
+
+async function aggregatePhase(
+  runId: string,
+  orch: Orchestrator,
+  status: ReconcileResult,
+): Promise<DonePhase> {
+  const ctx = await readContext<ReviewContext>(runId);
+
+  // Read accepted comments from the orchestrator
+  const { comments, partialFiles } = await orch.readAcceptedComments();
+
+  // Get authoritative task records for real failed-file details
+  const tasks = await orch.listTasks();
+
+  // Build summary
+  const total = ctx.files.length;
+  const succeeded = status.taskCounts.succeeded;
+  const failed = status.taskCounts.failed;
+  const success = status.state === 'completed';
+  const commentCount = comments.length;
+
+  let summary: string;
+  if (success) {
+    summary = commentCount > 0
+      ? `${succeeded}/${total} files reviewed — ${commentCount} finding(s)`
+      : `${succeeded}/${total} files reviewed — no findings`;
+  } else {
+    summary = `${succeeded}/${total} files succeeded, ${failed}/${total} failed — ${commentCount} finding(s) across succeeded files (PARTIAL)`;
+  }
+
+  // ---- Shared filter + relocation pipeline -------------------------------
+  const pipeline = await applyFilterRelocationPipeline(runId, ctx, comments);
+
   // ---- Render reports ----------------------------------------------------
-  // Read format from stored launch config; fall back to 'both'
-  let effectiveFormat: string = 'both';
-  try {
-    const launch = await readLaunchConfig(runId);
-    effectiveFormat = launch?.format ?? 'both';
-  } catch { /* use default */ }
+  const launch = await readLaunchConfig(runId).catch(() => null);
+  const effectiveFormat = launch?.format ?? 'both';
 
   if (effectiveFormat === 'markdown' || effectiveFormat === 'both') {
-    let md = renderMarkdownReport(ctx, visibleComments, {
+    let md = renderMarkdownReport(ctx, pipeline.visibleComments, {
       partialFiles,
       rawCommentCount: comments.length,
-      filteredCommentCount,
-      relocatedCount,
-      relocationFallbackCount,
-      warnings,
+      filteredCommentCount: pipeline.hiddenCount,
+      relocatedCount: pipeline.relocatedCount,
+      relocationFallbackCount: pipeline.relocationFallbackCount,
+      warnings: pipeline.eventWarnings,
     });
     if (!success) {
-      const failedTaskDetails = partialFiles.map((path) => ({
-        path,
-        attemptsUsed: 0,
-        maxAttempts: 0,
-        reason: 'task failed or incomplete',
-      }));
+      const failedTaskDetails = buildFailedFileDetails(tasks);
       md += [
         '',
         '## ⚠️ Failed Files (Partial Review)',
@@ -405,7 +462,9 @@ async function aggregatePhase(
         `Succeeded tasks: ${succeeded}`,
         `Failed tasks: ${failed}`,
         '',
-        ...failedTaskDetails.map((f) => `- \`${f.path}\` — ${f.reason}`),
+        ...failedTaskDetails.map(
+          (f) => `- \`${f.path}\` — ${f.reason} (attempts ${f.attemptsUsed}/${f.maxAttempts})`,
+        ),
         '',
       ].join('\n');
     }
@@ -413,16 +472,16 @@ async function aggregatePhase(
   }
 
   if (effectiveFormat === 'json' || effectiveFormat === 'both') {
-    const parsed = JSON.parse(renderJsonReport(ctx, visibleComments, {
+    const parsed = JSON.parse(renderJsonReport(ctx, pipeline.visibleComments, {
       partialFiles,
       durationMs: 0,
       rawCommentCount: comments.length,
-      filteredCommentCount,
-      filterWarnings,
-      relocatedCount,
-      relocationFallbackCount,
-      relocationWarnings,
-      warnings,
+      filteredCommentCount: pipeline.hiddenCount,
+      filterWarnings: pipeline.filterWarnings,
+      relocatedCount: pipeline.relocatedCount,
+      relocationFallbackCount: pipeline.relocationFallbackCount,
+      relocationWarnings: pipeline.relocationWarnings,
+      warnings: pipeline.eventWarnings,
     }));
     const j = success
       ? JSON.stringify(parsed, null, 2)
@@ -439,13 +498,13 @@ async function aggregatePhase(
     await writeReport(runId, 'report.json', j);
   }
 
-  // Build failed files detail for the DonePhase output
-  const failedFiles = success ? undefined : partialFiles.map((path) => ({
-    path,
-    attemptsUsed: 0,
-    maxAttempts: DEFAULT_MAX_ATTEMPTS,
-    reason: 'task failed or incomplete',
-  }));
+  // ---- Bridge to post_comments: write accepted comments to comments.jsonl
+  //      so ocr-post-comments can read them for PR posting.
+  for (const c of pipeline.visibleComments) {
+    await appendComment(runId, c);
+  }
+
+  const failedFiles = success ? undefined : buildFailedFileDetails(tasks);
 
   return {
     phase: 'done',
@@ -463,16 +522,6 @@ async function aggregatePhase(
 }
 
 // ---------------------------------------------------------------------------
-// Types for aggregate pipeline
-// ---------------------------------------------------------------------------
-
-interface ToolCallEvent {
-  type?: string;
-  tool?: string;
-  args?: Record<string, unknown>;
-}
-
-// ---------------------------------------------------------------------------
 // Main entry point
 // ---------------------------------------------------------------------------
 
@@ -486,24 +535,19 @@ async function main(): Promise<void> {
     let fileCount: number;
 
     if (explicitRunId) {
-      // ---- Subsequent call: continue existing run ------------------------
       effectiveRunId = explicitRunId;
 
-      // Read context for file count (used in output)
       try {
         const ctx = await readContext<ReviewContext>(effectiveRunId);
         fileCount = ctx.files.length;
       } catch {
-        // Context may not be readable; carry on with the run directory
         fileCount = 0;
       }
     } else {
-      // ---- First call: prepare + start ---------------------------------
       const result = await prepareAndStart(argv);
       effectiveRunId = result.effectiveRunId;
       fileCount = result.fileCount;
 
-      // Handle preview / dry-run
       if (result.preview || result.dryRun) {
         output({
           phase: 'done',
@@ -520,7 +564,6 @@ async function main(): Promise<void> {
         return;
       }
 
-      // Handle 0 files
       if (fileCount === 0) {
         output({
           phase: 'done',
@@ -535,7 +578,6 @@ async function main(): Promise<void> {
         return;
       }
 
-      // File count warning
       if (fileCount > MAX_FILES_PER_RUN) {
         process.stderr.write(
           `[review] Warning: ${fileCount} files exceeds MAX_FILES_PER_RUN (${MAX_FILES_PER_RUN}). ` +
@@ -544,8 +586,7 @@ async function main(): Promise<void> {
       }
     }
 
-    // ---- Read concurrency from launch config ----------------------------
-    let concurrency = 2; // default
+    let concurrency = 2;
     try {
       const launch = await readLaunchConfig(effectiveRunId);
       concurrency = launch?.concurrency ?? 2;
@@ -553,7 +594,6 @@ async function main(): Promise<void> {
       // Use default
     }
 
-    // ---- Run main loop -------------------------------------------------
     const result = await mainLoop(effectiveRunId, concurrency);
     output(result);
   } catch (err) {

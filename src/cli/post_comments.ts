@@ -1,9 +1,38 @@
 #!/usr/bin/env node
-import { readComments, readContext } from '../core/runs/store.js';
+import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import { readComments, readContext, resolveExistingRunDir } from '../core/runs/store.js';
+import { Orchestrator } from '../core/orchestrator/orchestrator.js';
 import type { CommentRecord } from '../core/model/comment.js';
 import type { ReviewContext } from '../core/model/request.js';
 import { githubPostComments } from './github_post.js';
 import { gitlabPostComments } from './gitlab_post.js';
+
+/**
+ * Read comments for posting. For schema-1 runs, reads from the orchestrator's
+ * accepted-attempt comments. For legacy runs, reads from comments.jsonl.
+ */
+async function readCommentsForPosting(runId: string): Promise<{ comments: CommentRecord[]; ctx: ReviewContext }> {
+  const ctx = await readContext<ReviewContext>(runId);
+
+  // Try schema-1 path first
+  const runDir = await resolveExistingRunDir(runId);
+  if (runDir) {
+    try {
+      const runJson = JSON.parse(await readFile(join(runDir, 'run.json'), 'utf8'));
+      if (runJson.schemaVersion === 1) {
+        const orch = new Orchestrator(runDir);
+        const { comments } = await orch.readAcceptedComments();
+        return { comments, ctx };
+      }
+    } catch {
+      // Fall through to legacy path
+    }
+  }
+
+  const comments = await readComments<CommentRecord>(runId);
+  return { comments, ctx };
+}
 
 function parseFlags(argv: string[]): Record<string, string> {
   const out: Record<string, string> = {};
@@ -42,8 +71,7 @@ async function main(): Promise<void> {
   }
   requirePr(provider, pr);
 
-  const comments = await readComments<CommentRecord>(args.runId);
-  const ctx = await readContext<ReviewContext>(args.runId);
+  const { comments, ctx } = await readCommentsForPosting(args.runId);
   const dryRun = args['dry-run'] === 'true';
   const retry = args.retry ? Number.parseInt(args.retry, 10) : 1;
 
