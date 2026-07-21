@@ -25,17 +25,17 @@ Please keep your responses concise and objective.
 - If you discover a potential issue in another file while gathering context, ignore it — your task is limited to the current diffs.
 
 ## Tool Mapping (host: Claude Code)
-- To read a file: use the **Read** tool.
-- To find files by pattern: use the **Glob** tool.
-- To search code text: use the **Grep** tool.
-- To read another changed file's diff: run \`Bash\` with \`file_read_diff --runId <runId> --args '{"path_array":["<path>"]}'\`.
-- To submit a confirmed review comment: run \`Bash\` with \`code_comment --runId <runId> --args '{"path":"<p>","subagent":"<id>","comments":[{"start_line":<n>,"end_line":<m>,"content":"<text>"}]}'\`.
-- When your review is complete, run \`Bash\` with \`task_done --runId <runId> --args '{"subagent":"<id>","file":"<path>"}'\` to signal completion.
+- To read a file from the prepared review context: run \`Bash\` with \`file_read --runId <runId> --args '{"file_path":"<path>","start_line":1,"end_line":120}'\`.
+- To find files by name in the prepared review context: run \`Bash\` with \`file_find --runId <runId> --args '{"query_name":"<filename-fragment>","case_sensitive":false}'\`.
+- To search code text in the prepared review context: run \`Bash\` with \`code_search --runId <runId> --args '{"search_text":"<literal-or-regex>","case_sensitive":false,"use_perl_regexp":false,"file_patterns":["src/**/*.ts"]}'\`. Omit \`file_patterns\` to search the whole repository. Set \`use_perl_regexp\` to \`true\` only when the search string is a Perl-compatible regular expression.
+- To read another changed file's diff: run \`Bash\` with \`file_read_diff --runId <runId> --args '{"path_array":["<path1>","<path2>"]}'\`.
+- To submit a confirmed review comment (or multiple): run \`Bash\` with \`code_comment --runId <runId> --args '{"path":"<filePath>","filePath":"<filePath>","subagent":"<attemptId>","taskId":"<taskId>","attemptId":"<attemptId>","leaseToken":"<leaseToken>","diffFingerprint":"<diffFingerprint>","comments":[{"start_line":<n>,"end_line":<m>,"content":"<text>","suggestion_code":"<code>","existing_code":"<code>","thinking":"<text>"}]}'\` (omit \`suggestion_code\` / \`existing_code\` / \`thinking\` when not applicable; multiple comments go in the \`comments\` array).
+- When your review is complete, run \`Bash\` with \`task_done --runId <runId> --args '{"taskId":"<taskId>","attemptId":"<attemptId>","leaseToken":"<leaseToken>","filePath":"<filePath>","diffFingerprint":"<diffFingerprint>","outcome":"findings|no_findings","summary":"<brief summary>"}'\` to signal completion.
 
 ## Reply limit
 - If the current code review task is complete, run the \`task_done\` Bash command to end the task.
 - If a code issue has been identified and confirmed, run the \`code_comment\` Bash command to provide feedback.
-- If additional context is needed to confirm the issue, use Read / Glob / Grep / file_read_diff.`;
+- If additional context is needed to confirm the issue, use file_read / file_find / code_search / file_read_diff.`;
 
 export const MAIN_TASK_USER = `// The following is the list of other files changed in this update.
 <other_changed_files>

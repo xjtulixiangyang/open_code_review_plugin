@@ -11,16 +11,30 @@ function readRoot(path: string): string {
 
 test('MAIN_TASK TS 常量与 ocr-review-file skill 保持关键段落一致', () => {
   const skill = readRoot('skills/ocr-review-file/SKILL.md');
-  for (const snippet of [
+  // Snippets that must appear in BOTH files
+  const bothMustHave = [
     'You are a code review assistant developed by Alibaba.',
     'Focus on issues in newly added code.',
     'Findings from other files must NOT become the subject of your comments.',
-    'To submit a confirmed review comment',
     'task_done',
-  ]) {
+    // schema-1 credential fields
+    'taskId',
+    'attemptId',
+    'leaseToken',
+    'diffFingerprint',
+    'outcome',
+    'summary',
+  ];
+  for (const snippet of bothMustHave) {
     assert.ok(MAIN_TASK_SYSTEM.includes(snippet), `TS MAIN_TASK missing ${snippet}`);
     assert.ok(skill.includes(snippet), `SKILL MAIN_TASK missing ${snippet}`);
   }
+
+  // Tool count: both should mention code_comment and file_read_diff
+  assert.ok(MAIN_TASK_SYSTEM.includes('code_comment'), 'TS MAIN_TASK missing code_comment');
+  assert.ok(skill.includes('code_comment'), 'SKILL MAIN_TASK missing code_comment');
+  assert.ok(MAIN_TASK_SYSTEM.includes('file_read_diff'), 'TS MAIN_TASK missing file_read_diff');
+  assert.ok(skill.includes('file_read_diff'), 'SKILL MAIN_TASK missing file_read_diff');
 });
 
 test('PLAN_TASK TS 常量与 ocr-plan skill 保持关键段落一致', () => {

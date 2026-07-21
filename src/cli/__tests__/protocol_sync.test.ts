@@ -5,31 +5,42 @@ import { join } from 'node:path';
 
 const ROOT = process.cwd();
 
-function extractProtocol(text: string): string {
-  const match = text.match(/<!-- ORCHESTRATOR-PROTOCOL:START -->([\s\S]*?)<!-- ORCHESTRATOR-PROTOCOL:END -->/);
-  assert.ok(match, 'missing orchestrator protocol markers');
-  return match[1].trim();
-}
-
-test('Claude Code and OpenCode commands share the exact orchestration protocol', async () => {
-  const claude = await readFile(join(ROOT, 'commands/review.md'), 'utf8');
-  const opencode = await readFile(join(ROOT, 'commands/review-opencode.md'), 'utf8');
-  assert.equal(extractProtocol(claude), extractProtocol(opencode));
+test('both host commands are thin shells delegating to review.ts', async () => {
+  for (const path of ['commands/review.md', 'commands/review-opencode.md']) {
+    const text = await readFile(join(ROOT, path), 'utf8');
+    // The thin shell delegates all decisions to the TS engine
+    assert.match(text, /dist\/commands\/review\.mjs/, `${path}: must delegate to review.ts engine`);
+    assert.match(text, /\$ARGUMENTS/, `${path}: must pass through arguments`);
+    assert.match(text, /phase/, `${path}: must reference the protocol phase field`);
+    assert.match(text, /dispatch|wait|done/, `${path}: must reference the three protocol phases`);
+    // Must NOT contain the old inline protocol (it moved to review.ts)
+    assert.doesNotMatch(text, /ORCHESTRATOR-PROTOCOL:START/, `${path}: protocol must not be inline`);
+    assert.doesNotMatch(text, /ORCHESTRATOR-PROTOCOL:END/, `${path}: protocol must not be inline`);
+  }
 });
 
-test('shared protocol uses effective run, pull claims, reconciliation, and strict aggregation', async () => {
-  const command = await readFile(join(ROOT, 'commands/review.md'), 'utf8');
-  const protocol = extractProtocol(command);
+test('review.ts engine contains the deterministic orchestration protocol', async () => {
+  const engine = await readFile(join(ROOT, 'src/commands/review.ts'), 'utf8');
+  // Programmatic API calls (review.ts imports directly, not shell-out)
   for (const required of [
-    'ocr-orchestrator-start',
+    'startCandidate',
     'effectiveRunId',
-    'ocr-orchestrator-reconcile',
-    'ocr-orchestrator-claim',
-    'ocr-orchestrator-ack',
-    'ocr-orchestrator-dispatch-fail',
-    'ocr-aggregate --runId <effectiveRunId> --format <format> --strict true',
+    'Orchestrator',
+    '.reconcile(',
+    '.claim(',
     'nextLeaseDeadline',
-  ]) assert.match(protocol, new RegExp(required.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+    'readAcceptedComments',
+    // Phase protocol
+    'phase:',
+    'DispatchPhase',
+    'WaitPhase',
+    'DonePhase',
+    "'dispatch'",
+    "'wait'",
+    "'done'",
+  ]) {
+    assert.ok(engine.includes(required), `engine missing: ${required}`);
+  }
 });
 
 test('reviewer contracts require lease-bound comments and explicit completion outcome', async () => {

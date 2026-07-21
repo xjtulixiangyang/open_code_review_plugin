@@ -147,6 +147,18 @@ export class Orchestrator {
   }
 
   /**
+   * Return all task records under the run lock.
+   *
+   * Used by aggregators to get authoritative task state including
+   * attempt counts and failure reasons for diagnostic reports.
+   */
+  listTasks(): Promise<TaskRecord[]> {
+    return withRunLock(this.runDir, async () => {
+      return this.listTasksLocked();
+    });
+  }
+
+  /**
    * Stage code comments under a valid lease.
    *
    * Validates once under one withRunLock: run active, task running,

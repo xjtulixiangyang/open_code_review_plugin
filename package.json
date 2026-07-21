@@ -51,6 +51,7 @@
     "vitest": "^4.1.10"
   },
   "dependencies": {
-    "write-file-atomic": "^5.0.1"
+    "write-file-atomic": "^5.0.1",
+    "yaml": "^2.9.0"
   }
 }
