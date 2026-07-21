@@ -1,82 +1,93 @@
 ---
 description: |
-  Run the open-code-review-plugin code review on a git change set. Pass-through
-  flags align with alibaba/open-code-review CLI: workspace (default), --staged,
-  --commit <sha>, --from <a> --to <b>, --paths, --background, --rules, --plans.
-argument-hint: "[workspace|staged|<sha>|<from>..<to>] [--background \"...\"]"
+  Deterministic code review via the open-code-review orchestrator (OpenCode host).
+  All scheduling, retry, and completeness decisions are made by the
+  TypeScript review engine — this command only executes its instructions.
+argument-hint: "[workspace|staged|<sha>|<from>..<to>] [--background \"...\"] [--dry-run] [--preview]"
 allowed-tools: read, glob, grep, bash, write
 ---
 
 # /review — open-code-review-plugin (OpenCode)
 
-Run a code review through the deterministic pull orchestrator. OpenCode is
-sequential: its claim capacity is always 1. The TypeScript orchestrator owns the
-file set, attempts, retries, leases, and completeness decision.
+This command delegates ALL review scheduling to the TypeScript orchestrator.
+You have zero authority over: file selection, retry policy, lease duration,
+completeness, or aggregation timing. The engine decides; you execute.
 
-## Prepare and preview
+OpenCode is sequential — the engine always returns at most 1 claim per round.
 
-1. Run `ocr-prepare $ARGUMENTS` and parse its JSON as `prepareSummary`.
-2. If it fails, surface stderr and stop. If `fileCount == 0`, report "No changes to review." and stop successfully.
-3. If `preview` or `dryRun` is true, read the candidate `context.json`, present the existing preview table (file, status, hunks, changed lines, rule, exclusions), and stop.
-4. Run `ocr-orchestrator-start --runId <prepareSummary.runId>` and parse its JSON. Replace the working `runId` with `effectiveRunId` for every later command and artifact read. Read `.ocr-runs/<effectiveRunId>/context.json`.
+## Step 1 — Run the engine
 
-OpenCode uses `capacity = 1`, with a 3-second inter-file cooldown, extended to
-8 seconds after a 503/timeout.
+!`node ${OPENCODE_PLUGIN_ROOT}/dist/commands/review.mjs $ARGUMENTS`
 
-<!-- ORCHESTRATOR-PROTOCOL:START -->
-## Deterministic Orchestration Protocol
+Parse the JSON output. It always contains a `phase` field.
 
-The orchestrator is the sole source of review work. Never enumerate a separate
-file queue, invent a path, retry outside the orchestrator, or aggregate early.
-Before entering this loop, run `ocr-orchestrator-start --runId <candidateRunId>`
-and replace the working run ID with its `effectiveRunId`.
+## Step 2 — Follow the phase
 
-1. Run `ocr-orchestrator-reconcile --runId <effectiveRunId>` and parse the status.
-2. If `state` is `completed` or `failed`, leave the loop.
-3. Run `ocr-orchestrator-claim --runId <effectiveRunId> --capacity <capacity>`.
-4. For every returned claim, use exactly its `runId`, `taskId`, `attemptId`,
-   `leaseToken`, `leaseDeadline`, `filePath`, and `diffFingerprint`. Build that
-   file's PLAN/rule guidance from the effective run context, then dispatch one
-   reviewer carrying all claim fields.
-5. After the host accepts a reviewer dispatch, run
-   `ocr-orchestrator-ack --runId <effectiveRunId> --taskId <taskId> --attemptId <attemptId>`.
-   If dispatch itself fails before acknowledgement, run
-   `ocr-orchestrator-dispatch-fail --runId <effectiveRunId> --taskId <taskId> --attemptId <attemptId>`.
-6. Wait for the dispatched reviewers to finish, then reconcile again. A reviewer
-   message is not completion authority; only a validated structured `task_done`
-   transition changes the task to `succeeded`.
-7. If claim returns an empty array while leases are live, do not exit or invent
-   work. Wait until the returned `nextLeaseDeadline` (without busy polling), then
-   reconcile. Repeat until the run is terminal.
-8. After terminal state and post-processing, run
-   `ocr-aggregate --runId <effectiveRunId> --format <format> --strict true`.
-   Exit 0 means complete review. Exit 1 means a partial diagnostic report was
-   written because at least one file failed. Exit 2 means aggregation was not
-   allowed. Any non-zero strict aggregate is the final command failure and must
-   not be described as a clean review.
-<!-- ORCHESTRATOR-PROTOCOL:END -->
+### phase = "dispatch"
 
-## Per-claim reviewer preparation
+For each entry in `claims[]` (at most 1 for OpenCode), perform the
+preparation below, then dispatch one `ocr-review-file` skill task as a
+subagent. Acknowledge the claim after dispatch. When the reviewer finishes,
+go back to Step 1 with `reRunArgs`.
 
-For each claim, find `context.files[]` by exact `filePath`; never substitute
-another file.
+**Per-claim reviewer preparation:**
 
-1. If changed lines are at least 50, invoke `ocr-plan` with effective run ID and
-   file path, then store valid output under `plans/<safePathKey>.json`.
-2. Run `ocr-plan-guidance --runId <effectiveRunId> --path <filePath>`.
-3. Resolve `systemRule` from `rulesHit[0].text`, `.message`, then rule docs.
-4. Apply `ocr-review-file` with `runId`, `taskId`, `attemptId`, `leaseToken`,
-   `leaseDeadline`, `filePath`, `diffFingerprint`, current diff, changed files,
-   background, system rule, plan guidance, and ISO time.
+1. Read `context.json` from `.ocr-runs/<effectiveRunId>/context.json`.
+   Find the file entry whose `path` equals `claim.filePath`. Read the diff
+   from that entry or via `file_read_diff --runId <effectiveRunId>`.
 
-## Filter and relocation
+2. Resolve plan guidance: if the file has ≥ 50 changed lines, invoke the
+   `ocr-plan` skill first. Then run:
+   `ocr-plan-guidance --runId <effectiveRunId> --path <claim.filePath>`
+   On soft failure record `OCRP-SKILL-040` and use empty guidance.
 
-After success, filter and relocate only accepted-attempt comments. Filter and
-relocation failures are soft and cannot change task status. Do not use legacy
-`comments.jsonl` as the schema-1 comment source.
+3. Resolve system rule: from the file's `rulesHit[0].text`, then `.message`,
+   otherwise empty with `OCRP-RULES-094`.
 
-## Present result
+4. Dispatch the reviewer subagent with this task payload:
 
-Use format from prepare arguments, default `both`. Read artifacts under the
-effective run ID. A failed strict aggregate is partial and non-successful.
-Optional posting uses `ocr-post-comments --runId <effectiveRunId> ...`.
+   > Review file `{claim.filePath}`. Use these exact immutable claim fields
+   > for every `code_comment` and `task_done` call:
+   > - runId: `{claim.runId}`
+   > - taskId: `{claim.taskId}`
+   > - attemptId: `{claim.attemptId}`
+   > - leaseToken: `{claim.leaseToken}`
+   > - leaseDeadline: `{claim.leaseDeadline}`
+   > - filePath: `{claim.filePath}`
+   > - diffFingerprint: `{claim.diffFingerprint}`
+   >
+   > Also provide: the current file diff, the changed files list from
+   > context, requirement background, resolved system rule, resolved
+   > plan guidance, and the current ISO date-time.
+   >
+   > Use the `ocr-review-file` skill for review. When done, call
+   > `task_done` with all credentials and outcome. Never invent or
+   > alter claim fields.
+
+**After dispatch**, acknowledge the claim:
+!`ocr-orchestrator-ack --runId <claim.runId> --taskId <claim.taskId> --attemptId <claim.attemptId>`
+
+**After the reviewer completes**, continue:
+!`node ${OPENCODE_PLUGIN_ROOT}/dist/commands/review.mjs <reRunArgs>`
+
+Go back to Step 1 with the output.
+
+### phase = "wait"
+
+Wait until `waitUntil` (ISO timestamp), then:
+!`node ${OPENCODE_PLUGIN_ROOT}/dist/commands/review.mjs <reRunArgs>`
+
+Go back to Step 1 with the output.
+
+### phase = "done"
+
+Read the report from `reportMdPath` (if markdown/both) and/or
+`reportJsonPath` (if json/both). Present the result to the user:
+
+- If `success` is true: "✓ Review complete. {summary}"
+- If `success` is false: "✗ Review failed (partial). {summary}"
+  List each file from `failedFiles[]` with its reason.
+
+Optional: post comments via `ocr-post-comments --runId <effectiveRunId>`.
+
+Stop. The review command is finished.

@@ -5,16 +5,18 @@ import { join } from 'node:path';
 
 const ROOT = process.cwd();
 
-test('commands/review.md is a thin shell that delegates to review.ts', async () => {
-  const claude = await readFile(join(ROOT, 'commands/review.md'), 'utf8');
-  // The thin shell delegates all decisions to the TS engine
-  assert.match(claude, /dist\/commands\/review\.mjs/, 'must delegate to review.ts engine');
-  assert.match(claude, /\$ARGUMENTS/, 'must pass through arguments');
-  assert.match(claude, /phase/, 'must reference the protocol phase field');
-  assert.match(claude, /dispatch|wait|done/, 'must reference the three protocol phases');
-  // Must NOT contain the old inline protocol (it moved to review.ts)
-  assert.doesNotMatch(claude, /ORCHESTRATOR-PROTOCOL:START/, 'protocol must not be inline in .md');
-  assert.doesNotMatch(claude, /ORCHESTRATOR-PROTOCOL:END/, 'protocol must not be inline in .md');
+test('both host commands are thin shells delegating to review.ts', async () => {
+  for (const path of ['commands/review.md', 'commands/review-opencode.md']) {
+    const text = await readFile(join(ROOT, path), 'utf8');
+    // The thin shell delegates all decisions to the TS engine
+    assert.match(text, /dist\/commands\/review\.mjs/, `${path}: must delegate to review.ts engine`);
+    assert.match(text, /\$ARGUMENTS/, `${path}: must pass through arguments`);
+    assert.match(text, /phase/, `${path}: must reference the protocol phase field`);
+    assert.match(text, /dispatch|wait|done/, `${path}: must reference the three protocol phases`);
+    // Must NOT contain the old inline protocol (it moved to review.ts)
+    assert.doesNotMatch(text, /ORCHESTRATOR-PROTOCOL:START/, `${path}: protocol must not be inline`);
+    assert.doesNotMatch(text, /ORCHESTRATOR-PROTOCOL:END/, `${path}: protocol must not be inline`);
+  }
 });
 
 test('review.ts engine contains the deterministic orchestration protocol', async () => {
